@@ -20,6 +20,20 @@ O sistema será organizado em três módulos principais:
 
 A arquitetura deve seguir os princípios de Clean Architecture e manter baixo acoplamento para facilitar a substituição do banco de dados, do solver e do framework da API.
 
+## Execução local com Docker
+
+O container atual serve o mockup estático do front-end. A API, o banco de dados e os solvers ainda não estão integrados.
+
+Requisitos: Docker Engine e Docker Compose.
+
+```bash
+docker compose up --build
+```
+
+Depois, acesse [http://localhost:8080](http://localhost:8080). Para usar outra porta local, defina `PARETOLAB_PORT`, por exemplo: `PARETOLAB_PORT=8090 docker compose up --build`.
+
+Para encerrar, use `Ctrl+C` e depois execute `docker compose down`.
+
 ## Testes e desenvolvimento
 
 Os testes unitários estão previstos para utilizar Pytest. Também está prevista a adoção de agentes especializados por módulo e de um agente coordenador para delegar tarefas; seus papéis e fluxos serão detalhados conforme o projeto evoluir.

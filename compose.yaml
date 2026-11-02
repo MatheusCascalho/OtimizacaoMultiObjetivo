@@ -1,0 +1,8 @@
+services:
+  paretolab:
+    build:
+      context: ./frontend/mockups
+      dockerfile: Dockerfile
+    ports:
+      - "${PARETOLAB_PORT:-8080}:8080"
+    restart: unless-stopped
