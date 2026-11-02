@@ -12,10 +12,10 @@ src/
     __init__.py
     tsp/
       __init__.py
+      instance.py
       models/
         __init__.py
-        route_model.py
-        route_model_builder.py
+        tsp_biobjective_model_builder.py
   monoobjective_algorithms/
     __init__.py
     interfaces.py
@@ -51,6 +51,8 @@ Cada modelo matemático deve ser implementado em Pyomo dentro de `optimization_p
 O builder constrói e configura variáveis, restrições e objetivo(s) do modelo, respeitando a direção dos objetivos e os limites fornecidos no pedido. A execução do solver, a interpretação de status e a conversão do resultado para `SolveResult` pertencem à implementação monoobjetivo, não ao builder. Essa separação permite que o algoritmo multiobjetivo peça diferentes objetivos principais e limites (como na ε-restrição), enquanto o solver selecionado delega a construção ao builder correspondente.
 
 Os builders e modelos não devem depender de Flask, Celery, banco de dados, armazenamento de arquivos ou notebooks. Testes unitários devem verificar, conforme aplicável, os componentes do modelo gerado — variáveis, função objetivo, restrições, direções e limites — usando instâncias pequenas e determinísticas.
+
+O primeiro modelo concreto segue a formulação MILP do TSP biobjetivo da página 5 de [`trabalho_completo.pdf`](../UFMG/trabalho_completo.pdf): variáveis binárias para arcos dirigidos, restrições de grau de entrada/saída e variáveis MTZ contínuas para os nós diferentes do depósito 1. O modelo mantém expressões de tempo e distância e ativa apenas um objetivo por execução; limites nos objetivos secundários permitem sua utilização por métodos como ε-restrição. O coeficiente MTZ é generalizado pela quantidade de nós (`n - 1` e `n - 2`), em vez de fixar os valores 249 e 248 da instância de 250 nós do documento.
 
 ## Contrato monoobjetivo
 
