@@ -4,7 +4,7 @@
 
 Especificar o fluxo ponta a ponta para criar uma instância de otimização a partir de arquivos, inspecionar os dados, configurar e acompanhar uma execução assíncrona e analisar seus resultados. O catálogo de tipos de problema determina quais entradas, algoritmos e visualizações estão disponíveis.
 
-Esta é uma especificação funcional. API, banco de dados e solvers ainda não estão integrados ao mockup. O protótipo navegável fica em [`mockups/`](./mockups/).
+Esta é uma especificação funcional. O scaffold da API e da infraestrutura local já existe, mas os fluxos de instâncias, uploads, execuções, resultados e notificações ainda não estão integrados ao mockup. O protótipo navegável fica em [`mockups/`](./mockups/).
 
 ## Catálogo de tipos de problema
 
@@ -568,6 +568,12 @@ Mensagens de erro não devem conter stack traces nem ser convertidas em estados 
 10. O grafo prévio inicia com o parâmetro 20, exibe por cidade até `n - 1` vizinhos ordenados pelo menor peso e se atualiza ao alterar o parâmetro.
 11. O fluxo funciona por teclado, tem rótulos e estados anunciáveis por tecnologia assistiva, e não depende exclusivamente de cor.
 12. Em larguras móveis e desktop, etapas, gráficos, arquivos e ações permanecem legíveis e utilizáveis.
+
+## Ambiente local e mockup
+
+O Compose inicia a infraestrutura de desenvolvimento descrita no [plano de implementação](./IMPLEMENTATION_PLAN.md). Copie `.env.example` para `.env` e substitua os valores de exemplo antes de executar `docker compose up --build`. Frontend e API são publicados somente em `127.0.0.1`; PostgreSQL, Redis e SILO ficam na rede interna do Compose. Os volumes de PostgreSQL e objetos são persistentes.
+
+O scaffold da API, worker e infraestrutura já está implementado. Nesta etapa a API expõe somente `/health/live` e `/health/ready`, o worker registra uma tarefa de ping para validar a integração Celery/Redis e a revisão Alembic inicial é um baseline vazio. Persistência de instâncias, uploads, execuções e notificações ainda será implementada nas próximas fases.
 
 ## Mockup e limites
 

@@ -27,21 +27,23 @@ A arquitetura deve seguir os princípios de Clean Architecture e manter baixo ac
 
 ## Execução local com Docker
 
-O container atual serve o mockup estático do front-end. A API, o banco de dados e os solvers ainda não estão integrados.
+O Compose inicia o mockup estático, a API Flask, o worker Celery, PostgreSQL, Redis e armazenamento de objetos S3 compatível SILO. O fluxo funcional de instâncias e otimizações ainda será integrado nas próximas fases.
 
-Requisitos: Docker Engine e Docker Compose.
+Requisitos: Docker Engine e Docker Compose. Copie `.env.example` para `.env` e substitua os valores `replace-this-*` por credenciais de desenvolvimento locais antes de iniciar os serviços. Mantenha `POSTGRES_PASSWORD` igual à senha da `DATABASE_URL` e `SILO_ROOT_USER`/`SILO_ROOT_PASSWORD` iguais às credenciais `S3_ACCESS_KEY`/`S3_SECRET_KEY`. Não compartilhe essas credenciais nem as versione.
 
 ```bash
 docker compose up --build
 ```
 
-Depois, acesse [http://localhost:8080](http://localhost:8080). Para usar outra porta local, defina `PARETOLAB_PORT`, por exemplo: `PARETOLAB_PORT=8090 docker compose up --build`.
+Depois, acesse o mockup em [http://127.0.0.1:8080](http://127.0.0.1:8080) e o healthcheck da API em [http://127.0.0.1:5000/health/ready](http://127.0.0.1:5000/health/ready). As portas publicadas ficam vinculadas somente ao loopback; PostgreSQL, Redis e SILO não publicam portas no host. Para usar outras portas locais, defina `PARETOLAB_PORT` ou `PARETOLAB_API_PORT` no `.env`.
 
 Para encerrar, use `Ctrl+C` e depois execute `docker compose down`.
 
+Os dados do PostgreSQL e do SILO ficam em volumes Docker persistentes. Para aplicar migrações manualmente, execute `docker compose exec api alembic upgrade head`; na inicialização da API as migrações são aplicadas automaticamente antes do servidor iniciar.
+
 ## Testes e desenvolvimento
 
-Os testes unitários estão previstos para utilizar Pytest. Também está prevista a adoção de agentes especializados por módulo e de um agente coordenador para delegar tarefas; seus papéis e fluxos serão detalhados conforme o projeto evoluir.
+Os testes unitários utilizam Pytest. Instale as dependências de desenvolvimento com `pip install -r requirements-dev.txt` e execute `PYTHONPATH=src pytest`.
 
 ## Documentação
 

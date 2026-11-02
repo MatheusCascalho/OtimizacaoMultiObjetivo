@@ -7,8 +7,8 @@ Plano de tarefas para implementar a especificação em [`README.md`](./README.md
 - [x] Especificação funcional, contratos propostos e critérios de aceite documentados.
 - [x] Mockup navegável com dados e estados simulados em `mockups/`.
 - [x] Modelo TSP biobjetivo e heurística aleatória presentes em `src/`.
-- [ ] API, persistência de instâncias, uploads reais, worker assíncrono e notificações ainda não integrados.
-- [ ] `compose.yaml` ainda inicia somente o servidor estático do mockup.
+- [x] Scaffold da API Flask, worker Celery, configuração PostgreSQL/S3 e ambiente Compose implementados na Fase 2.
+- [ ] Fluxos funcionais de instâncias, uploads, execuções, resultados e notificações ainda não integrados.
 
 ## Fase 1 — Fechar decisões e contratos
 
@@ -66,13 +66,13 @@ Manter o início simples: um app factory Flask, blueprints por recurso, casos de
 - [x] Definir paginação para listas: `limit=50`, máximo 200, `offset=0`.
 - [x] Confirmar limite máximo de 10 MiB por arquivo CSV e a imagem/tag SILO recomendada abaixo.
 - [x] Definir exclusão de instância em cascata; bloquear exclusão enquanto houver execução ativa e executar limpeza de objetos externos de forma repetível.
-- [ ] Implementar migrações versionadas e inicialização repetível do PostgreSQL.
-- [ ] Adicionar serviços Flask, worker Celery, Redis, PostgreSQL e SILO ao Compose, com volumes persistentes e preparação repetível do bucket.
+- [x] Configurar migrações Alembic versionadas e inicialização automática antes de iniciar a API. A revisão inicial é baseline vazia; migrações das entidades da feature entram junto à persistência da Fase 3.
+- [x] Adicionar serviços Flask, worker Celery, Redis, PostgreSQL e SILO ao Compose, com volumes persistentes e inicialização repetível do bucket.
 - [x] Definir publicação local do frontend em `127.0.0.1:8080` e da API em `127.0.0.1:5000`; banco, broker, worker e object storage não publicam portas no host.
 - [ ] Implementar limites/paginação e expiração dos uploads; uploads não associados a uma instância expiram em 1 hora.
 - [x] Definir healthchecks: `pg_isready` para PostgreSQL, `redis-cli ping` para Redis, `GET /minio/health/ready` para SILO (validar com a imagem fixada) e `/health/live`/`/health/ready` na API; API e worker dependem dos serviços necessários.
-- [ ] Implementar os healthchecks e dependências de inicialização no Compose.
-- [ ] Documentar execução, configuração local e comandos de migração/teste.
+- [x] Implementar healthchecks e dependências de inicialização no Compose.
+- [x] Documentar execução, configuração local e comandos de migração/teste.
 
 **Saída:** ambiente integrado inicializável localmente, sem remover a possibilidade de servir o mockup durante o desenvolvimento.
 

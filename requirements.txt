@@ -1,2 +1,10 @@
 pyomo>=6.8,<7
 matplotlib>=3.9,<4
+alembic>=1.14,<2
+boto3>=1.35,<2
+celery[redis]>=5.4,<6
+Flask>=3.1,<4
+gunicorn>=23,<24
+psycopg[binary]>=3.2,<4
+pydantic-settings>=2.7,<3
+SQLAlchemy>=2.0,<3
