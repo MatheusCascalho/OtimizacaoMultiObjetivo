@@ -8,6 +8,14 @@ Adotar a seguinte estrutura como referência para o código Python:
 
 ```text
 src/
+  optimization_problems/
+    __init__.py
+    tsp/
+      __init__.py
+      models/
+        __init__.py
+        route_model.py
+        route_model_builder.py
   monoobjective_algorithms/
     __init__.py
     interfaces.py
@@ -24,15 +32,25 @@ notebooks/
 data/
   instances/
 tests/
+  optimization_problems/
   monoobjective_algorithms/
   multiobjective_algorithms/
 ```
 
+- **`optimization_problems`** contém os modelos matemáticos dos problemas de otimização, organizados por família (por exemplo, `tsp`). Os modelos devem ser implementados com Pyomo. Cada modelo deve ter sua própria classe builder, responsável por construir e configurar o modelo Pyomo a partir da instância e do pedido de solução; builders não devem executar lógica de API, persistência ou visualização.
 - **`monoobjective_algorithms`** contém heurísticas e solvers exatos, organizados em um subpacote por família de problemas. Cada implementação procura uma solução para um pedido monoobjetivo. O contrato compartilhado fica na raiz do pacote; tipos e detalhes específicos do problema ficam em seu subpacote (por exemplo, `tsp`).
 - **`multiobjective_algorithms`** contém operações reutilizáveis de análise multiobjetivo, como dominância, e métodos de geração de fronteira, como ε-restrição. O pacote recebe um solver pela interface comum, sem importar ou selecionar implementações concretas de TSP ou de outra família.
 - **`notebooks/`** guarda notebooks de experimentação, execução reproduzível e visualização. Notebooks orquestram os pacotes, mas não são o local das implementações reutilizáveis nem a dependência dos serviços da aplicação.
 - **`data/instances/`** guarda instâncias de teste versionáveis e não sensíveis. Arquivos enviados por usuários e dados de execução não devem ser gravados nessa pasta: seguem o fluxo de armazenamento da aplicação descrito na especificação do workflow de instâncias.
-- **`tests/`** espelha os pacotes e mantém testes unitários de contratos, algoritmos e análise. Testes não devem depender de notebooks ou de serviços externos.
+- **`tests/`** espelha os pacotes e mantém testes unitários de builders, modelos, contratos, algoritmos e análise. Testes não devem depender de notebooks ou de serviços externos.
+
+### Modelos Pyomo e builders
+
+Cada modelo matemático deve ser implementado em Pyomo dentro de `optimization_problems`, agrupado pela família de problema e separado dos algoritmos que o executam. Para cada modelo concreto, criar uma classe builder própria, com responsabilidade explícita de traduzir a instância e o `SolveRequest` em um modelo Pyomo pronto para execução. Se houver variantes matemáticas distintas, cada variante deve ter seu próprio builder; não concentrar modelos diferentes em um builder genérico com ramificações implícitas.
+
+O builder constrói e configura variáveis, restrições e objetivo(s) do modelo, respeitando a direção dos objetivos e os limites fornecidos no pedido. A execução do solver, a interpretação de status e a conversão do resultado para `SolveResult` pertencem à implementação monoobjetivo, não ao builder. Essa separação permite que o algoritmo multiobjetivo peça diferentes objetivos principais e limites (como na ε-restrição), enquanto o solver selecionado delega a construção ao builder correspondente.
+
+Os builders e modelos não devem depender de Flask, Celery, banco de dados, armazenamento de arquivos ou notebooks. Testes unitários devem verificar, conforme aplicável, os componentes do modelo gerado — variáveis, função objetivo, restrições, direções e limites — usando instâncias pequenas e determinísticas.
 
 ## Contrato monoobjetivo
 

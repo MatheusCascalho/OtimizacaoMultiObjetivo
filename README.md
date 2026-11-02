@@ -16,11 +16,12 @@ O sistema separa interface, serviços da aplicação e algoritmos para manter ba
 
 - **Front-end:** HTML, CSS e JavaScript vanilla, sem frameworks; interface para seleção de problemas, envio de arquivos e visualização dos resultados.
 - **API e serviços da aplicação:** Flask para expor os serviços de execução dos modelos e gerenciar os dados das instâncias; Pydantic para especificação e validação dos dados; SQLite como banco de dados inicial.
+- **`optimization_problems`:** modelos matemáticos implementados em Pyomo, organizados por família de problema e com uma classe builder dedicada para cada modelo.
 - **`monoobjective_algorithms`:** heurísticas e solvers exatos com uma interface comum, separados em subpacotes por família de problemas (por exemplo, TSP).
 - **`multiobjective_algorithms`:** ferramentas de análise multiobjetivo e métodos de geração da fronteira de Pareto, agnósticos às implementações concretas de solver.
 - **Experimentação e dados:** `notebooks/` para execução e visualização; `data/instances/` para instâncias de teste. Consulte o [padrão de desenvolvimento dos algoritmos](docs/algorithms/README.md).
 
-Pyomo, NumPy e Pandas são opções previstas para modelagem e processamento; Plotly e Seaborn para visualização; Jupyter para experimentação. As implementações concretas e dependências serão definidas conforme os problemas e algoritmos forem integrados.
+NumPy e Pandas são opções previstas para processamento; Plotly e Seaborn para visualização; Jupyter para experimentação. As implementações concretas e dependências serão definidas conforme os problemas e algoritmos forem integrados.
 
 A arquitetura deve seguir os princípios de Clean Architecture e manter baixo acoplamento para facilitar a substituição do banco de dados, do solver e do framework da API.
 

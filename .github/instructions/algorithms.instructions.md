@@ -4,14 +4,17 @@ description: "Use when creating, modifying, reviewing, or testing optimization a
 applyTo:
   - "**/monoobjective_algorithms/**"
   - "**/multiobjective_algorithms/**"
+  - "**/optimization_problems/**"
   - "tests/**/monoobjective_algorithms/**"
   - "tests/**/multiobjective_algorithms/**"
+  - "tests/**/optimization_problems/**"
   - "notebooks/**"
 ---
 
 # Algorithm Development Guidelines
 
 - Before implementing or changing an algorithm, read and follow the canonical specification in [`docs/algorithms/README.md`](../../docs/algorithms/README.md). Treat it as the source of truth; do not copy or redefine its contracts here.
+- Implement optimization models in `optimization_problems` using Pyomo, with a dedicated builder class for each concrete model. Keep builders responsible for model construction and keep solver execution/result interpretation in the monoobjective solver implementation.
 - Keep monoobjective heuristics and exact solvers in `monoobjective_algorithms`, organized by problem family. Make every solver conform to the shared client-facing interface, while declaring and validating any capability differences.
 - Keep reusable multiobjective analysis and Pareto-front methods in `multiobjective_algorithms`. Inject solvers through the shared interface; do not couple these methods to a concrete solver, problem representation, API, worker, database, or file-storage adapter.
 - Keep reusable algorithm implementations out of notebooks. Notebooks may load instances, configure and call the packages, and present results; place reusable logic in the appropriate package.
