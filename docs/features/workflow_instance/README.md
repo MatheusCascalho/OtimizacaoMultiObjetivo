@@ -56,18 +56,350 @@ Estados da instância: **Rascunho**, **Pronta para otimização**, **Em fila**, 
 
 Notificações devem ser associadas à instância e à execução, persistir após navegação/atualização quando houver suporte de backend, e levar o usuário ao recurso relacionado. O status também deve ser obtido ao abrir o dashboard, não depender exclusivamente de a tela permanecer aberta.
 
-## Contratos de serviço esperados
+## Diagramas da arquitetura
 
-Os nomes abaixo são conceituais; a API ainda precisa definir os contratos finais:
+### Componentes e comunicação
 
-- Consultar o catálogo de problemas e suas opções.
-- Criar instância com metadados, arquivos e seleções validadas.
-- Solicitar uma execução e receber um identificador de execução sem aguardar o solver.
-- Consultar estado/progresso e resultados de uma execução.
-- Solicitar cancelamento de uma execução ativa e receber sua confirmação/estado final.
-- Consultar notificações do usuário e marcar como lidas.
+```mermaid
+flowchart LR
+    Browser["Frontend<br/>HTML, CSS e JavaScript"] -->|"HTTP / JSON / CSV"| API["API Flask"]
+    API --> App["Serviços de aplicação Python"]
+    App --> Domain["Domínio<br/>validação, análise e otimização"]
+    API --> DB[("PostgreSQL<br/>dados persistentes")]
+    App --> DB
+    API -->|"S3 API"| ObjectStore["Armazenamento de objetos<br/>SILO local / S3 compatível"]
+    App -->|"S3 API"| ObjectStore
+    API -->|"publica tarefa"| Redis[("Redis<br/>broker Celery")]
+    Redis -->|"consumida por"| Worker["Worker Celery Python"]
+    Worker --> Domain
+    Worker --> DB
+    Worker -->|"lê arquivos por chave"| ObjectStore
+    Browser -. "polling de estado" .-> API
+```
 
-O mecanismo de atualização (polling, eventos enviados pelo servidor ou outro) e autenticação são decisões da implementação. Erros e estados devem ter representação explícita no contrato.
+O navegador comunica-se somente com a API. A API e os serviços de aplicação compartilham PostgreSQL e o armazenamento de objetos por interfaces próprias; o worker executa processamento pesado fora do ciclo HTTP. Redis transporta tarefas Celery, mas não armazena o estado durável da aplicação.
+
+### Ciclo de uma otimização assíncrona
+
+```mermaid
+sequenceDiagram
+    actor U as Usuário
+    participant F as Frontend
+    participant A as API Flask
+    participant P as PostgreSQL
+    participant R as Redis / Celery
+    participant W as Worker Python
+    participant S as Serviço de domínio
+
+    U->>F: Solicita otimização
+    F->>A: POST /instances/{id}/runs
+    A->>P: Registra execução queued
+    A->>R: Publica tarefa com run_id
+    A-->>F: 202 Accepted + run_id
+    R->>W: Entrega tarefa
+    W->>P: Atualiza execução para running
+    W->>S: Executa algoritmo/solver
+    S-->>W: Progresso e soluções
+    W->>P: Persiste progresso e resultados
+    loop Enquanto não terminal
+        F->>A: GET /runs/{run_id}
+        A->>P: Consulta status/progresso
+        A-->>F: Status atual
+    end
+    W->>P: Marca completed/failed e registra notificação
+    F->>A: GET /runs/{run_id}/results
+    A->>P: Consulta soluções paginadas
+    A-->>F: Resumo e página de soluções
+```
+
+O cancelamento é solicitado por `POST /runs/{run_id}/cancel`; a API registra `cancel_requested` e sinaliza o worker. A execução só transita para `cancelled` depois de o worker confirmar o encerramento. Falhas ao publicar uma tarefa devem ser registradas e comunicadas, sem deixar uma execução indefinidamente em `queued`.
+
+## API do backend
+
+A API HTTP será implementada em Flask, com prefixo `/api/v1`. O processamento pesado (validação/análise de dados que possa bloquear, execução de algoritmos e solver) fica em serviços Python fora das rotas HTTP. As execuções serão enfileiradas com Celery usando Redis como broker; a API retorna sem aguardar o worker.
+
+### Catálogo de problemas
+
+| Método e endpoint | Responsabilidade |
+|---|---|
+| `GET /problem-types` | Listar os tipos publicados no catálogo. |
+| `GET /problem-types/{problem_type_id}` | Obter objetivos, formatos de entrada, análises, algoritmos e parâmetros de um tipo. |
+
+O catálogo é a fonte de opções da interface. A API valida as opções recebidas contra a versão/configuração vigente do catálogo.
+
+### Upload e instâncias
+
+| Método e endpoint | Responsabilidade |
+|---|---|
+| `POST /uploads` | Receber um ou mais arquivos via `multipart/form-data`, validar metadados básicos e armazená-los em área temporária. |
+| `GET /uploads/{upload_id}` | Consultar estado, metadados e validade do upload temporário. |
+| `POST /instances` | Criar a instância associando uploads, tipo e configuração. |
+| `GET /instances` | Listar instâncias acessíveis ao usuário/workspace, com paginação e estado. |
+| `GET /instances/{instance_id}` | Consultar metadados, configuração e estado da instância. |
+| `PATCH /instances/{instance_id}` | Alterar nome/configuração se o estado permitir; não altera arquivos ou configuração usados por uma execução em andamento. |
+
+O upload pode retornar `202 Accepted` quando a validação de conteúdo continuar em background; nesse caso, consultar `GET /uploads/{upload_id}` até ficar pronto ou inválido. A instância só pode ser criada com todos os uploads exigidos pelo tipo em estado válido. Para o TSP, o serviço Python valida que ambas as matrizes sejam quadradas, tenham dimensões e ordem de cidades iguais e contenham pesos numéricos válidos.
+
+Exemplo de criação:
+
+```http
+POST /api/v1/instances
+Content-Type: application/json
+```
+
+```json
+{
+  "problem_type_id": "tsp-time-distance",
+  "name": "TSP — Belo Horizonte",
+  "files": {
+    "time_matrix": "upload_123",
+    "distance_matrix": "upload_456"
+  },
+  "configuration": {
+    "preview": ["weighted_graph", "matrix_heatmap"],
+    "result_views": ["pareto_frontier", "solutions_table"],
+    "algorithm_id": "epsilon-constraint",
+    "parameters": {}
+  }
+}
+```
+
+Resposta `201 Created` inclui a instância criada, estado `ready` e links para sua análise. `algorithm_id` é ilustrativo e só deve ser aceito se estiver disponível no catálogo/ambiente.
+
+### Análise dos dados de entrada
+
+| Método e endpoint | Responsabilidade |
+|---|---|
+| `GET /instances/{instance_id}/analysis/input/graph?objective=time&neighbors_per_city=20` | Retornar cidades e arcos de entrada filtrados pelos vizinhos mais próximos. |
+| `GET /instances/{instance_id}/analysis/input/matrix?objective=time` | Retornar a matriz e metadados necessários ao heatmap. |
+
+Exemplo de resposta do grafo:
+
+```json
+{
+  "objective": {
+    "id": "time",
+    "label": "Tempo",
+    "unit": "min",
+    "direction": "minimize"
+  },
+  "neighbors_per_city": {
+    "requested": 20,
+    "effective": 5
+  },
+  "nodes": [
+    { "id": "A", "label": "A", "x": 92, "y": 124 },
+    { "id": "B", "label": "B", "x": 201, "y": 49 }
+  ],
+  "edges": [
+    { "source": "A", "target": "B", "weight": 18 }
+  ]
+}
+```
+
+`neighbors_per_city` é uma preferência de visualização, não altera os dados da instância nem a otimização. O valor efetivo não pode exceder `n - 1`; selecionar vizinhos por linha/origem e preservar direção em matrizes assimétricas. O serviço gera e persiste uma disposição de coordenadas por instância, reutilizada tanto neste endpoint quanto no grafo de cada solução.
+
+### Execuções assíncronas
+
+| Método e endpoint | Responsabilidade |
+|---|---|
+| `POST /instances/{instance_id}/runs` | Criar uma execução e enfileirar a tarefa Celery. |
+| `GET /instances/{instance_id}/runs` | Listar o histórico de execuções da instância. |
+| `GET /runs/{run_id}` | Consultar estado, progresso e timestamps da execução. |
+| `POST /runs/{run_id}/cancel` | Solicitar cancelamento da tarefa em andamento. |
+
+Iniciar execução:
+
+```http
+POST /api/v1/instances/{instance_id}/runs
+Idempotency-Key: 60c575c3-...
+Content-Type: application/json
+```
+
+```json
+{
+  "algorithm_id": "epsilon-constraint",
+  "parameters": {}
+}
+```
+
+A API valida a instância e a configuração, cria o registro da execução, publica uma tarefa Celery e responde `202 Accepted`:
+
+```json
+{
+  "run_id": "run_789",
+  "instance_id": "inst_123",
+  "status": "queued",
+  "status_url": "/api/v1/runs/run_789"
+}
+```
+
+O worker Python consome a tarefa, atualiza o estado e progresso no armazenamento persistente, executa o serviço de domínio/solver e grava resultados ou erro. Celery/Redis transportam tarefas e sinais de execução; Redis não é a fonte permanente de estado, resultados ou notificações. A chave `Idempotency-Key` evita iniciar execuções duplicadas em reenvios da mesma solicitação.
+
+Estados de execução: `queued`, `running`, `cancel_requested`, `cancelled`, `completed` e `failed`. O cancelamento retorna `202 Accepted` quando solicitado e permanece `cancel_requested` até confirmação do worker. Uma solicitação repetida é idempotente; só marcar `cancelled` depois de o worker confirmar.
+
+A primeira versão do cliente pode consultar `GET /runs/{run_id}` por polling com intervalo progressivo. `GET /events` pode oferecer atualizações via Server-Sent Events como evolução; não é necessário para iniciar a integração.
+
+### Resultados, soluções e exportação
+
+| Método e endpoint | Responsabilidade |
+|---|---|
+| `GET /runs/{run_id}/results` | Retornar resumo da execução e página de soluções. |
+| `GET /runs/{run_id}/solutions/{solution_id}` | Consultar objetivos, valores, unidades e rota de uma solução. |
+| `GET /runs/{run_id}/solutions/{solution_id}/graph` | Retornar somente os arcos da solução e as coordenadas persistidas da instância. |
+| `GET /runs/{run_id}/solutions/{solution_id}/route.csv` | Baixar a sequência ordenada de cidades visitadas, incluindo o retorno à origem. |
+
+Os endpoints de resultados só retornam dados finais quando a execução estiver `completed`; enquanto estiver ativa, respondem conflito com o estado corrente. As listas de soluções devem ser paginadas. O CSV é servido com `Content-Type: text/csv` e `Content-Disposition: attachment`.
+
+### Notificações
+
+| Método e endpoint | Responsabilidade |
+|---|---|
+| `GET /notifications` | Listar notificações do usuário/workspace com paginação e estado de leitura. |
+| `PATCH /notifications/{notification_id}` | Marcar uma notificação como lida. |
+
+Ao concluir uma execução, o serviço de aplicação registra uma notificação ligada à instância e à execução. O cliente pode navegar a partir dela para a execução correspondente. A notificação deve ser persistida junto ao armazenamento da aplicação, não somente em Redis.
+
+### Arquitetura de execução
+
+1. Flask autentica/autorizada a solicitação e executa validações rápidas de contrato e estado.
+2. Serviços de aplicação/domain validam os dados e regras do problema; não dependem diretamente de Flask ou Celery.
+3. Para processamento demorado, a API registra a execução e envia uma tarefa Celery para Redis, respondendo `202 Accepted`.
+4. Um ou mais workers Celery executam serviços Python de análise/otimização e persistem progresso, resultado e falha no armazenamento da aplicação.
+5. A API lê o estado persistido para polling, serve resultados e registra notificações.
+
+O envio da tarefa e a persistência da execução devem ser coordenados para evitar execução sem registro ou registro preso em `queued` se a publicação falhar. Erros de publicação devem ser reportados; uma estratégia de outbox pode ser adotada se necessária para garantir consistência.
+
+## Persistência
+
+### Decisões adotadas
+
+| Dado | Persistência | Uso |
+|---|---|---|
+| Metadados de instâncias, uploads, execuções e notificações | PostgreSQL | Fonte persistente e transacional para a API e os workers; consultas, paginação, estados e relacionamentos. |
+| Matrizes e demais arquivos de entrada | Armazenamento de objetos compatível com S3 | Upload/download por chave; não guardar o conteúdo integral dos arquivos no banco relacional. |
+| Soluções e valores dos objetivos | PostgreSQL inicialmente | Consultar, filtrar e paginar soluções e seus objetivos sem carregar um artefato inteiro. Arquivos de resultados podem complementar essa estratégia se volume medido justificar. |
+| Catálogo de tipos de problemas | Arquivos JSON versionados no repositório | Revisão por código e histórico; cada instância/execução registra a versão usada. |
+| Tarefas Celery | Redis | Broker para enfileirar tarefas e sinais de execução; não é fonte permanente de metadados, status, resultados ou notificações. |
+
+### Armazenamento de objetos S3 compatível
+
+O ambiente local deve subir, em container, uma implementação de armazenamento compatível com a API S3, usando **SILO** como opção para esse serviço. A aplicação acessa-o por uma interface/configuração S3 padrão, sem acoplar o domínio ao produto. Isso permite trocar SILO por um serviço S3 gerenciado em outro ambiente sem alterar os serviços de aplicação.
+
+Armazenar no bucket os arquivos enviados, com chaves opacas e não previsíveis. No PostgreSQL guardar apenas referências e metadados, incluindo papel do arquivo, chave do objeto, nome original, tamanho, hash SHA-256, tipo de conteúdo, estado da validação e timestamps. O nome original não deve ser usado diretamente como chave. Aplicar limites de tamanho e limpeza de uploads temporários/órfãos conforme política de retenção.
+
+Os CSVs são validados por serviço Python antes de serem associados a uma instância pronta. O worker pode ler os objetos pelo serviço de armazenamento usando a chave registrada; não deve depender de compartilhar um diretório local com a API. Em desenvolvimento, endpoint, bucket e credenciais são configuração externa ao código; credenciais locais não devem ser incluídas no repositório. Produção deve usar credenciais e políticas próprias do ambiente, além de transporte seguro.
+
+### Dados relacionais e reprodutibilidade
+
+O PostgreSQL guarda metadados e resultados estruturados. Entidades/tabelas conceituais:
+
+- **Problem type/version:** identificador estável e versão do catálogo correspondente ao arquivo JSON versionado.
+- **Instance:** tipo e versão do catálogo, nome, workspace/proprietário, estado, configuração imutável usada na criação e timestamps.
+- **Instance file:** instância, papel no problema (por exemplo, matriz de tempo), chave S3, checksum, tamanho e estado de validação.
+- **City/node layout:** instância, identificador/ordem da cidade e coordenadas. Gerar uma vez e reutilizar nos grafos de entrada e das soluções.
+- **Optimization run:** instância, algoritmo e parâmetros congelados, versão de código/modelo quando disponível, estado, progresso, timestamps e erro sanitizado.
+- **Solution:** execução, identificador, status de dominância e metadados.
+- **Objective value:** solução, identificador do objetivo, valor numérico e unidade/direção referenciadas ao catálogo.
+- **Route stop:** solução, posição e identificador da cidade; preservar a ordem da rota e incluir o retorno à origem no TSP.
+- **Notification:** usuário/workspace, execução/instância relacionada, tipo, estado de leitura e data.
+
+```mermaid
+erDiagram
+    PROBLEM_TYPE_VERSION ||--o{ INSTANCE : configures
+    INSTANCE ||--o{ INSTANCE_FILE : references
+    INSTANCE ||--o{ CITY_LAYOUT : positions
+    INSTANCE ||--o{ OPTIMIZATION_RUN : has
+    OPTIMIZATION_RUN ||--o{ SOLUTION : produces
+    SOLUTION ||--o{ OBJECTIVE_VALUE : measures
+    SOLUTION ||--o{ ROUTE_STOP : visits
+    OPTIMIZATION_RUN ||--o{ NOTIFICATION : triggers
+    INSTANCE ||--o{ NOTIFICATION : concerns
+
+    PROBLEM_TYPE_VERSION {
+        string problem_type_id
+        string catalog_version
+    }
+    INSTANCE {
+        string instance_id
+        string name
+        string status
+        json configuration
+    }
+    INSTANCE_FILE {
+        string file_id
+        string role
+        string object_key
+        string sha256
+        string validation_status
+    }
+    CITY_LAYOUT {
+        string city_id
+        int position
+        float x
+        float y
+    }
+    OPTIMIZATION_RUN {
+        string run_id
+        string status
+        json parameters
+        float progress
+    }
+    SOLUTION {
+        string solution_id
+        boolean non_dominated
+    }
+    OBJECTIVE_VALUE {
+        string objective_id
+        float value
+        string unit
+    }
+    ROUTE_STOP {
+        int sequence
+        string city_id
+    }
+    NOTIFICATION {
+        string notification_id
+        string status
+        datetime created_at
+    }
+```
+
+Os nomes acima descrevem o modelo lógico; a implementação pode normalizá-lo de acordo com as convenções do projeto. Evitar serializar todos os resultados em um único JSON quando eles precisarem de paginação, filtros ou ordenação. Se execuções reais demonstrarem volume excessivo, arquivar dados detalhados em objetos (por exemplo, Parquet/JSONL) e manter no PostgreSQL resumo, índices e dados necessários às consultas comuns.
+
+Cada execução deve guardar a configuração efetiva e as versões do catálogo e do algoritmo/modelo, para que alterações futuras não modifiquem a interpretação dos resultados existentes. Redis e o estado interno do backend Celery não substituem o registro transacional da execução no PostgreSQL. Transições de estado e resultados devem ser persistidos pela aplicação/worker; tarefas repetidas devem ser idempotentes em relação ao identificador da execução.
+
+### SQLite e ambientes
+
+PostgreSQL é o banco principal da aplicação devido às gravações concorrentes da API e dos workers, transações e consultas relacionais. SQLite permanece adequado para testes unitários isolados ou experimentação local simplificada, mas não será o alvo do ambiente integrado da feature.
+
+O compose de desenvolvimento da aplicação deverá orquestrar os serviços necessários — API Flask, worker Celery, Redis, PostgreSQL, serviço S3 compatível SILO e frontend quando aplicável — com volumes persistentes para banco e objetos. Segredos devem ser fornecidos por variáveis/arquivos locais não versionados. Migrações versionadas devem inicializar e evoluir o esquema PostgreSQL; o bucket e suas configurações iniciais devem ser preparados de forma repetível.
+
+### Erros HTTP
+
+Usar corpo padronizado, por exemplo:
+
+```json
+{
+  "error": {
+    "code": "invalid_matrix",
+    "message": "A matriz de tempo deve ser quadrada.",
+    "details": [
+      { "file": "tempo.csv", "row": 4, "column": 2 }
+    ]
+  }
+}
+```
+
+- `400 Bad Request`: formato/parâmetro ausente ou inválido.
+- `401 Unauthorized` / `403 Forbidden`: usuário não autenticado ou sem acesso ao recurso.
+- `404 Not Found`: upload, instância, execução, solução ou notificação inexistente/acessível.
+- `409 Conflict`: operação incompatível com o estado atual, incluindo consulta prematura de resultados.
+- `413 Payload Too Large`: upload acima do limite.
+- `422 Unprocessable Entity`: arquivo, matriz ou configuração semanticamente inválidos.
+- `503 Service Unavailable`: fila/broker indisponível ou serviço necessário temporariamente fora do ar.
+
+Mensagens de erro não devem conter stack traces nem ser convertidas em estados de sucesso.
 
 ## Critérios de aceite
 
@@ -96,6 +428,6 @@ Na visualização do mockup, o controle começa em 20 vizinhos por cidade e orde
 
 - Contrato de CSV (codificação, separador, cabeçalho, separador decimal), regra de diagonal e tamanho máximo.
 - Algoritmos e parâmetros realmente disponíveis para cada tipo de problema.
-- Transporte de atualização assíncrona, política de cancelamento e formato de progresso/resultados.
-- Persistência, retenção e limites de tamanho dos arquivos; autenticação/autorização do workspace.
+- Política de cancelamento cooperativo dos workers e formato/periodicidade do progresso.
+- Limites de tamanho/retensão dos arquivos e resultados, autenticação/autorização do workspace e produto/versão SILO a usar no compose de desenvolvimento.
 - Frequência e retenção de notificações, incluindo comportamento com múltiplas execuções por instância.
