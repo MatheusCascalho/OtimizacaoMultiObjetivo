@@ -50,5 +50,6 @@ A IA foi usada para revisar o documento inicial, propor a mudança de enquadrame
 
 ## Próximos pontos
 
+- Formalizar o processo de especificação de features, definindo os artefatos mínimos, critérios de aceitação e fluxo de revisão antes da implementação.
 - Especificar o fluxo ponta a ponta de criação, execução e análise das instâncias, definindo entradas, validações, estados, erros, resultados esperados e critérios de aceitação.
 - Implementar esse fluxo de forma incremental, conectando a interface aos serviços de domínio e à API, substituindo os dados demonstrativos e cobrindo o comportamento com testes focados.
