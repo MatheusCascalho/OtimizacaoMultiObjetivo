@@ -12,11 +12,15 @@ A proposta do projeto é permitir que usuários:
 
 ## Arquitetura e tecnologias previstas
 
-O sistema será organizado em três módulos principais:
+O sistema separa interface, serviços da aplicação e algoritmos para manter baixo acoplamento:
 
 - **Front-end:** HTML, CSS e JavaScript vanilla, sem frameworks; interface para seleção de problemas, envio de arquivos e visualização dos resultados.
-- **API:** Flask para expor os serviços de execução dos modelos e gerenciar os dados das instâncias; Pydantic para especificação e validação dos dados; SQLite como banco de dados inicial.
-- **Modelos e análise:** Pyomo para modelagem da otimização; NumPy e Pandas para processamento de dados; Plotly e Seaborn para visualizações; Jupyter notebooks para experimentação local.
+- **API e serviços da aplicação:** Flask para expor os serviços de execução dos modelos e gerenciar os dados das instâncias; Pydantic para especificação e validação dos dados; SQLite como banco de dados inicial.
+- **`monoobjective_algorithms`:** heurísticas e solvers exatos com uma interface comum, separados em subpacotes por família de problemas (por exemplo, TSP).
+- **`multiobjective_algorithms`:** ferramentas de análise multiobjetivo e métodos de geração da fronteira de Pareto, agnósticos às implementações concretas de solver.
+- **Experimentação e dados:** `notebooks/` para execução e visualização; `data/instances/` para instâncias de teste. Consulte o [padrão de desenvolvimento dos algoritmos](docs/algorithms/README.md).
+
+Pyomo, NumPy e Pandas são opções previstas para modelagem e processamento; Plotly e Seaborn para visualização; Jupyter para experimentação. As implementações concretas e dependências serão definidas conforme os problemas e algoritmos forem integrados.
 
 A arquitetura deve seguir os princípios de Clean Architecture e manter baixo acoplamento para facilitar a substituição do banco de dados, do solver e do framework da API.
 
