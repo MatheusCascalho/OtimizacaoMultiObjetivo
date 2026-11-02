@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, request
 from sqlalchemy.engine import Engine
 
 from api.routes.health import health_blueprint
@@ -19,6 +19,18 @@ def create_app(settings: Settings | None = None) -> Flask:
     application_settings = settings or Settings()
     app = Flask(__name__)
     app.config.update(MAX_CONTENT_LENGTH=application_settings.max_upload_bytes + 64 * 1024)
+
+    @app.after_request
+    def add_cors_headers(response):
+        origin = request.headers.get("Origin")
+        response.headers["Access-Control-Allow-Origin"] = origin or "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = (
+            "Content-Type, Authorization, X-Requested-With, Idempotency-Key"
+        )
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        return response
+
     engine: Engine = create_engine(application_settings)
     celery_app = create_celery_app(application_settings)
     s3_client = create_s3_client(application_settings)

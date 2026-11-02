@@ -137,7 +137,8 @@ Para desenvolvimento local: endpoint S3 interno `http://silo:9000`, console `900
 
 ## Fase 7 — Integrar o frontend e concluir o fluxo
 
-- [ ] Substituir dados demonstrativos do mockup por chamadas à API para catálogo, upload, criação e análise prévia, preservando o fluxo e padrões visuais existentes.
+- [x] Substituir dados demonstrativos do mockup por chamadas à API para catálogo e listagem de instâncias, preservando o fluxo e padrões visuais existentes; manter fallback demonstrativo quando o backend não está disponível.
+- [ ] Conectar o fluxo de upload e criação de instância ao backend real, incluindo validação de arquivos e feedback de erro do contrato.
 - [ ] Ligar estados de envio, validação, criação e recuperação de erros aos contratos reais; impedir submissões duplicadas e preservar campos em falhas recuperáveis.
 - [ ] Ligar dashboard a consulta/polling do estado da instância e execução; manter navegação disponível durante o processamento.
 - [ ] Implementar solicitação e confirmação visível de cancelamento, sem exibir resultados como concluídos prematuramente.

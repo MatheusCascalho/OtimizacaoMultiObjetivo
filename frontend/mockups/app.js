@@ -1,4 +1,5 @@
-const solutions = [
+const API_BASE_URL = window.PARETOLAB_API_BASE_URL || 'http://127.0.0.1:5000/api/v1';
+const mockSolutions = [
   { id: '018', cost: 18.4, coverage: 82.6, items: 12, frontier: true },
   { id: '014', cost: 16.8, coverage: 78.1, items: 10, frontier: true },
   { id: '021', cost: 21.2, coverage: 87.3, items: 15, frontier: true },
@@ -25,6 +26,116 @@ const solutions = [
   { id: '033', cost: 33.2, coverage: 97.4, items: 20, frontier: true },
 ];
 
+const state = {
+  solutions: [...mockSolutions],
+  problemTypes: [],
+  instances: [],
+  selectedInstanceId: null,
+};
+
+async function fetchJson(endpoint, options = {}) {
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    ...options,
+    headers: {
+      Accept: 'application/json',
+      ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+      ...(options.headers || {}),
+    },
+    credentials: 'omit',
+  });
+
+  if (response.status === 204) return null;
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.error?.message || `Falha na requisição (${response.status})`);
+  }
+  return payload;
+}
+
+function setApiStatus(message, isError = false) {
+  const feedback = document.querySelector('#compare-feedback');
+  if (!feedback) return;
+  feedback.textContent = message;
+  feedback.classList.toggle('error', isError);
+  if (!isError) {
+    window.setTimeout(() => {
+      feedback.textContent = '';
+      feedback.classList.remove('error');
+    }, 2600);
+  }
+}
+
+function populateProblemTypes(problemTypes = state.problemTypes) {
+  const select = document.querySelector('#problem-type');
+  if (!select) return;
+
+  const options = (problemTypes.length ? problemTypes : [{ id: 'tsp-time-distance', name: 'TSP tempo/distância' }])
+    .map((problemType) => `<option value="${problemType.id}">${problemType.name}</option>`)
+    .join('');
+
+  select.innerHTML = options;
+}
+
+function applyInstanceSummary(instance) {
+  const instanceName = document.querySelector('#instance-name');
+  if (!instanceName) return;
+
+  const label = instance?.name || 'Mochila biobjetivo';
+  const suffix = instance?.instance_id ? ` / ${instance.instance_id}` : ' / instância 07';
+  instanceName.innerHTML = `${label} <span class="instance-id">${suffix}</span>`;
+
+  const microLabel = document.querySelector('.micro-label');
+  if (microLabel) {
+    const problemTypeName = state.problemTypes.find((problemType) => problemType.id === instance?.problem_type_id)?.name || 'PROBLEMA BIOBJETIVO';
+    microLabel.textContent = `${problemTypeName.toUpperCase()} · DADOS REAIS`;
+  }
+
+  const runBadge = document.querySelector('.run-badge');
+  if (runBadge) {
+    runBadge.innerHTML = '<span class="status-dot"></span>Concluída';
+  }
+}
+
+async function loadProblemTypes() {
+  try {
+    const payload = await fetchJson('/problem-types');
+    state.problemTypes = payload.problem_types || [];
+    populateProblemTypes();
+    return true;
+  } catch (error) {
+    console.warn('Fallback para catálogo demonstrativo:', error.message);
+    state.problemTypes = [{ id: 'tsp-time-distance', name: 'TSP tempo/distância' }];
+    populateProblemTypes();
+    return false;
+  }
+}
+
+async function loadInstances() {
+  try {
+    const payload = await fetchJson('/instances?limit=5');
+    state.instances = payload.instances || [];
+    if (state.instances.length) {
+      state.selectedInstanceId = state.instances[0].instance_id;
+      applyInstanceSummary(state.instances[0]);
+      return true;
+    }
+  } catch (error) {
+    console.warn('Fallback para instância demonstrativa:', error.message);
+    state.instances = [];
+    state.selectedInstanceId = null;
+    applyInstanceSummary({ name: 'Mochila biobjetivo', instance_id: 'instância 07' });
+    return false;
+  }
+
+  return false;
+}
+
+async function initializeDashboard() {
+  await loadProblemTypes();
+  await loadInstances();
+  renderTable();
+}
+
 const chart = document.querySelector('#pareto-chart');
 const chartContext = chart.getContext('2d');
 const tableBody = document.querySelector('#solutions-body');
@@ -40,7 +151,7 @@ const percent = (value) => `${value.toFixed(1).replace('.', ',')}%`;
 
 function renderTable() {
   const query = searchInput.value.trim().toLowerCase();
-  visibleSolutions = solutions.filter((solution) => {
+  visibleSolutions = state.solutions.filter((solution) => {
     const matchesSearch = `${solution.id} ${currency(solution.cost)} ${percent(solution.coverage)}`.toLowerCase().includes(query);
     return matchesSearch && (activeView === 'all' || solution.frontier);
   });
@@ -58,7 +169,7 @@ function renderTable() {
   const shown = pageSolutions.length;
   document.querySelector('#table-summary').textContent = query
     ? `Encontradas ${visibleSolutions.length} soluções`
-    : `Mostrando ${shown} de ${activeView === 'all' ? solutions.length : solutions.filter((solution) => solution.frontier).length} soluções`;
+    : `Mostrando ${shown} de ${activeView === 'all' ? state.solutions.length : state.solutions.filter((solution) => solution.frontier).length} soluções`;
   document.querySelector('.table-count').textContent = visibleSolutions.length;
   drawChart();
 }
@@ -111,7 +222,7 @@ function drawChart() {
     chartContext.fillText(String(tick), position, height - 11);
   });
 
-  const frontier = solutions.filter((solution) => solution.frontier).sort((a, b) => a.cost - b.cost);
+  const frontier = state.solutions.filter((solution) => solution.frontier).sort((a, b) => a.cost - b.cost);
   chartContext.beginPath();
   frontier.forEach((solution, index) => {
     if (index === 0) chartContext.moveTo(x(solution.cost), y(solution.coverage));
@@ -124,7 +235,7 @@ function drawChart() {
   chartContext.setLineDash([]);
 
   plottedPoints = [];
-  const pointsToDraw = activeView === 'all' ? solutions : frontier;
+  const pointsToDraw = activeView === 'all' ? state.solutions : frontier;
   pointsToDraw.forEach((solution) => {
     const px = x(solution.cost);
     const py = y(solution.coverage);
@@ -150,7 +261,7 @@ function drawChart() {
 }
 
 function selectSolution(id) {
-  const solution = solutions.find((item) => item.id === id);
+  const solution = state.solutions.find((item) => item.id === id);
   if (!solution) return;
   selectedId = id;
   document.querySelector('#selected-title').textContent = `Solução ${solution.id}`;
@@ -265,20 +376,59 @@ dropZone.addEventListener('drop', (event) => {
 
 const dialogFileInput = document.querySelector('#dialog-file-input');
 dialogFileInput.addEventListener('change', () => showFileName(dialogFileInput, document.querySelector('#dialog-file-name'), 'Nenhum arquivo selecionado'));
-document.querySelector('#instance-form').addEventListener('submit', (event) => {
+document.querySelector('#instance-form').addEventListener('submit', async (event) => {
   if (event.submitter?.id !== 'create-instance') return;
   event.preventDefault();
   const name = document.querySelector('#instance-title').value.trim();
   if (!name) return;
-  const instanceName = document.querySelector('#instance-name');
-  instanceName.innerHTML = `${name} <span class="instance-id">/ nova instância</span>`;
-  document.querySelector('.micro-label').textContent = `${document.querySelector('#problem-type').value.toUpperCase()} · RASCUNHO`;
-  document.querySelector('.run-badge').innerHTML = '<span class="status-dot"></span>Não executada';
-  document.querySelector('.toolbar-date').textContent = 'Agora';
+
+  const selectedProblemType = document.querySelector('#problem-type').value;
+
+  const feedback = document.querySelector('#compare-feedback');
+  if (feedback) {
+    feedback.textContent = `Criando a instância “${name}”...`;
+    feedback.classList.remove('error');
+  }
+
+  try {
+    const payload = await fetchJson('/instances', {
+      method: 'POST',
+      body: JSON.stringify({
+        problem_type_id: selectedProblemType,
+        name,
+        files: {
+          time_matrix: 'demo-time-upload',
+          distance_matrix: 'demo-distance-upload',
+        },
+        node_order_confirmed: true,
+        configuration: {
+          algorithm_id: 'random-heuristic',
+          preview: ['matrix', 'graph'],
+          result_views: ['summary'],
+        },
+      }),
+    });
+
+    if (payload && payload.instance_id) {
+      await loadInstances();
+      setApiStatus(`Instância “${name}” criada com sucesso.`);
+    }
+  } catch (error) {
+    console.warn('Criação de instância em modo demonstrativo:', error.message);
+    const instanceName = document.querySelector('#instance-name');
+    if (instanceName) {
+      instanceName.innerHTML = `${name} <span class="instance-id">/ nova instância</span>`;
+    }
+    document.querySelector('.micro-label').textContent = `${selectedProblemType.toUpperCase()} · RASCUNHO`;
+    document.querySelector('.run-badge').innerHTML = '<span class="status-dot"></span>Não executada';
+    document.querySelector('.toolbar-date').textContent = 'Agora';
+    setApiStatus('Modo demonstrativo: a API está indisponível, mas o fluxo da interface foi atualizado.', true);
+  }
+
   dialog.close();
   document.querySelector('#instance-title').value = '';
 });
 
 const resizeObserver = new ResizeObserver(drawChart);
 resizeObserver.observe(chart);
-renderTable();
+initializeDashboard();
