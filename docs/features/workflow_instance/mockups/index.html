@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f5f4ee">
+    <title>ParetoLab | Workflow de instâncias</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Navegação principal">
+        <a class="brand" href="#inicio" aria-label="ParetoLab, início">
+          <svg class="brand-mark" viewBox="0 0 42 42" aria-hidden="true">
+            <path d="M8 33V8M8 33H35" fill="none" stroke="currentColor" stroke-width="1.7" />
+            <path d="m12 28 8-7 6 2 9-12" fill="none" stroke="currentColor" stroke-width="2.4" />
+            <circle cx="12" cy="28" r="2.4" fill="#d96545" /><circle cx="20" cy="21" r="2.4" fill="#4777a8" />
+            <circle cx="26" cy="23" r="2.4" fill="#28624d" /><circle cx="35" cy="11" r="2.4" fill="#e5b94f" />
+          </svg>
+          <span class="brand-word">pareto<span>lab</span></span>
+        </a>
+        <div class="workspace-picker"><span class="workspace-avatar">U</span><span class="workspace-copy"><strong>Laboratório UFMG</strong><small>Workspace acadêmico</small></span></div>
+        <p class="nav-label">ESPAÇO DE TRABALHO</p>
+        <nav class="primary-nav" aria-label="Seções">
+          <button class="nav-item" type="button" data-page="overview"><span class="nav-glyph" aria-hidden="true">◫</span>Visão geral</button>
+          <button class="nav-item active" type="button" data-page="instances" aria-current="page"><span class="nav-glyph" aria-hidden="true">⌘</span>Instâncias<span class="nav-count">01</span></button>
+          <button class="nav-item" type="button" data-page="models"><span class="nav-glyph" aria-hidden="true">◇</span>Modelos</button>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="solver-status"><span class="status-dot"></span><span><strong>Catálogo de problemas</strong><small>opções demonstrativas</small></span></div>
+          <div class="sidebar-footer"><span class="footer-mark">PL</span><span>Laboratório de trabalhos<br>computacionais <b>· 2026/2</b></span></div>
+        </div>
+      </aside>
+
+      <main class="main-content" id="inicio">
+        <header class="topbar">
+          <div class="breadcrumbs"><span>Workspace</span><span class="crumb-separator">/</span><strong id="breadcrumb-current">Instâncias</strong></div>
+          <div class="topbar-actions">
+            <span class="prototype-tag">PROTÓTIPO</span>
+            <div class="notification-wrap">
+              <button class="notification-button" id="notifications-button" type="button" aria-expanded="false" aria-controls="notification-panel" aria-label="Notificações, nenhuma não lida">
+                <span aria-hidden="true">♧</span><i class="notification-count" id="notification-count" hidden>1</i>
+              </button>
+              <section class="notification-panel" id="notification-panel" aria-label="Notificações" hidden>
+                <div class="notification-heading"><strong>Notificações</strong><span>DEMONSTRAÇÃO</span></div>
+                <p id="notification-empty">Nenhuma notificação por enquanto.</p>
+                <button class="notification-item" id="notification-item" type="button" hidden>
+                  <span class="notification-icon" aria-hidden="true">✓</span>
+                  <span><strong>Otimização concluída</strong><small id="notification-copy">A instância está pronta para análise.</small></span>
+                  <span class="notification-unread" aria-hidden="true"></span>
+                </button>
+              </section>
+            </div>
+            <span class="topbar-divider"></span><button class="profile-button" type="button" aria-label="Perfil de Marina Costa">MC</button>
+          </div>
+        </header>
+
+        <div class="page-wrap">
+          <section class="page-view" id="dashboard-view">
+            <div class="page-heading">
+              <div><p class="eyebrow"><span class="eyebrow-line"></span>ESTÚDIO DE OTIMIZAÇÃO <span class="eyebrow-index">01 / 04</span></p>
+                <h1>Instâncias <span>em análise</span></h1>
+                <p class="page-description">Explore dados, acompanhe execuções e interprete soluções.</p></div>
+              <button class="button button-primary" id="open-wizard" type="button"><span class="button-plus" aria-hidden="true">+</span> Nova Instância</button>
+            </div>
+
+            <section class="instance-toolbar" aria-label="Instância selecionada">
+              <div class="instance-identity"><span class="instance-icon" aria-hidden="true">↗</span>
+                <div><span class="micro-label" id="problem-label">TSP · TEMPO VS. DISTÂNCIA · DADOS ILUSTRATIVOS</span><strong id="instance-name">TSP — Belo Horizonte <span class="instance-id">/ instância 01</span></strong></div>
+              </div>
+              <div class="toolbar-meta"><span class="run-badge" id="run-badge"><span class="status-dot"></span><span id="run-status">Pronta para otimização</span></span><span class="meta-divider"></span><span class="toolbar-date" id="run-time">Criada agora</span></div>
+            </section>
+
+            <div class="instance-context">
+              <span><b>Entradas</b> <span id="instance-files">tempo.csv · distancia.csv</span></span>
+              <span><b>Modelo</b> <span id="instance-algorithm">ε-restrição · exemplo</span></span>
+              <span class="demo-tag">VISUALIZAÇÕES ILUSTRATIVAS</span>
+            </div>
+
+            <section class="metric-strip" aria-label="Resumo da instância">
+              <div class="metric"><span class="metric-label">NÓS</span><div class="metric-value">6 <span class="metric-note">no exemplo</span></div></div>
+              <div class="metric"><span class="metric-label">OBJETIVOS</span><div class="metric-value objective-values"><span class="objective-dot coral-dot"></span>Tempo <span class="metric-amp">×</span><span class="objective-dot blue-dot"></span>Distância</div></div>
+              <div class="metric"><span class="metric-label">ANÁLISE PRÉVIA</span><div class="metric-value">2 <span class="metric-note">visualizações</span></div></div>
+              <div class="metric metric-end"><span class="metric-label">EXECUÇÃO</span><div class="metric-value metric-status" id="metric-status">Não iniciada</div></div>
+            </section>
+
+            <section class="analysis-heading">
+              <div><p class="section-kicker">ANTES DA OTIMIZAÇÃO</p><h2>Análise dos dados</h2><p>Confira a estrutura e os pesos das matrizes de entrada.</p></div>
+              <div class="execution-actions">
+                <button class="button button-light" id="cancel-optimization" type="button" hidden>Cancelar otimização</button>
+                <button class="button button-light" id="view-results" type="button" disabled>Visualizar resultados</button>
+                <button class="button button-primary" id="start-optimization" type="button"><span aria-hidden="true">▷</span> Otimizar</button>
+              </div>
+            </section>
+
+            <div class="execution-message" id="execution-message" role="status" aria-live="polite" hidden></div>
+
+            <div class="analysis-grid">
+              <section class="panel graph-panel" id="graph-analysis">
+                <div class="panel-heading"><div><p class="section-kicker">VISUALIZAÇÃO 01</p><h3>Grafo de arcos ponderados</h3></div><span class="unit-chip">tempo · min</span></div>
+                <p class="panel-description">Arestas de menor tempo para cada cidade. O grafo é ilustrativo.</p>
+                <div class="graph-filter">
+                  <label for="neighbor-limit">Vizinhos mais próximos por cidade</label>
+                  <input id="neighbor-limit" type="number" min="1" step="1" value="20" inputmode="numeric" aria-describedby="neighbor-limit-help neighbor-limit-status">
+                  <span class="filter-unit">arestas</span>
+                </div>
+                <p class="filter-help" id="neighbor-limit-help">Ordenado pelo tempo da matriz. O limite efetivo depende do número de cidades.</p>
+                <p class="filter-status" id="neighbor-limit-status" role="status" aria-live="polite"></p>
+                <div class="network-chart">
+                  <svg id="input-graph" viewBox="0 0 560 250" role="img" aria-label="Grafo ilustrativo da matriz de tempo"></svg>
+                </div>
+                <div class="chart-footnote"><span><i class="legend-line"></i>Arco entre vizinhos selecionados</span><span>Pesos ilustrativos · min</span></div>
+              </section>
+
+              <section class="panel matrix-panel" id="matrix-analysis">
+                <div class="panel-heading"><div><p class="section-kicker">VISUALIZAÇÃO 02</p><h3>Matrizes de adjacência</h3></div><span class="unit-chip">CSV · 6 × 6</span></div>
+                <div class="matrix-tabs" role="tablist" aria-label="Objetivo da matriz">
+                  <button class="matrix-tab active" id="time-tab" type="button" role="tab" aria-selected="true" aria-controls="matrix-view" data-matrix="time">Tempo <span>(min)</span></button>
+                  <button class="matrix-tab" id="distance-tab" type="button" role="tab" aria-selected="false" aria-controls="matrix-view" data-matrix="distance">Distância <span>(km)</span></button>
+                </div>
+                <div class="matrix-view" id="matrix-view" role="tabpanel" aria-labelledby="time-tab">
+                  <div class="heatmap" id="heatmap" role="img" aria-label="Heatmap ilustrativo da matriz de tempo"></div>
+                  <div class="heatmap-scale"><span>menor valor</span><span class="scale-gradient" aria-hidden="true"></span><span>maior valor</span></div>
+                </div>
+                <p class="panel-footnote">Células na diagonal representam o mesmo nó. Valores e escalas ilustrativos.</p>
+              </section>
+            </div>
+
+            <section class="results-panel panel" id="results-panel" hidden>
+              <div class="panel-heading"><div><p class="section-kicker">ANÁLISE PÓS-OTIMIZAÇÃO · DADOS ILUSTRATIVOS</p><h2>Fronteira de Pareto</h2></div><span class="unit-chip">tempo × distância</span></div>
+              <p class="panel-description">Alternativas não dominadas encontradas na execução demonstrativa.</p>
+              <div class="result-content" id="pareto-analysis">
+                <div class="pareto-chart" role="img" aria-label="Gráfico ilustrativo da fronteira de Pareto, tempo em minutos versus distância em quilômetros">
+                  <span class="chart-axis y-axis">Distância (km) ↑</span>
+                  <svg viewBox="0 0 480 190" aria-hidden="true">
+                    <path class="grid-line" d="M48 20V160H465M48 125H465M48 90H465M48 55H465" />
+                    <path class="pareto-line" d="m100 135 73-25 76-26 83-31 81-27" />
+                    <g class="pareto-points"><circle cx="100" cy="135" r="5" /><circle cx="173" cy="110" r="5" /><circle cx="249" cy="84" r="5" /><circle cx="332" cy="53" r="5" /><circle cx="413" cy="26" r="5" /></g>
+                    <g class="axis-labels"><text x="97" y="177">42</text><text x="245" y="177">58</text><text x="410" y="177">76</text><text x="20" y="139">31</text><text x="20" y="92">45</text><text x="20" y="47">58</text></g>
+                  </svg>
+                  <span class="chart-axis x-axis">Tempo (min) →</span>
+                </div>
+                <div class="result-summary"><span class="metric-label">SOLUÇÕES NÃO DOMINADAS</span><strong>5</strong><p>Conjunto demonstrativo para ilustrar a análise multiobjetivo.</p></div>
+              </div>
+              <div class="table-scroll" id="solutions-table"><table><caption class="sr-only">Soluções ilustrativas da fronteira de Pareto</caption>
+                <thead><tr><th scope="col">Solução</th><th scope="col">Tempo · min</th><th scope="col">Distância · km</th><th scope="col">Status</th><th scope="col">Ações</th></tr></thead>
+                <tbody id="solutions-body"></tbody>
+              </table></div>
+            </section>
+
+            <footer class="page-footer"><span>LABORATÓRIO DE OTIMIZAÇÃO MULTIOBJETIVO</span><span><i aria-hidden="true">●</i> Protótipo estático · sem API ou solver</span></footer>
+          </section>
+
+          <section class="page-view secondary-view" id="overview-view" hidden>
+            <div class="page-heading"><div><p class="eyebrow"><span class="eyebrow-line"></span>ESPAÇO DE TRABALHO</p><h1>Visão geral</h1><p class="page-description">Você pode sair do dashboard e retornar enquanto uma execução segue em andamento.</p></div></div>
+            <section class="panel workspace-panel"><p class="section-kicker">ATIVIDADE DA INSTÂNCIA</p><h2 id="overview-instance">TSP — Belo Horizonte</h2><p id="overview-status">Pronta para otimização</p><button class="button button-primary" id="return-to-instance" type="button">Voltar à instância <span aria-hidden="true">→</span></button></section>
+          </section>
+
+          <section class="page-view secondary-view" id="models-view" hidden>
+            <div class="page-heading"><div><p class="eyebrow"><span class="eyebrow-line"></span>CATÁLOGO</p><h1>Modelos</h1><p class="page-description">As opções reais devem ser fornecidas pelo catálogo de cada tipo de problema.</p></div></div>
+            <section class="panel workspace-panel"><p class="section-kicker">OPÇÃO DO PROTÓTIPO</p><h2>ε-restrição</h2><p>Exemplo ilustrativo para demonstrar a seleção de algoritmo; disponibilidade de implementação não confirmada.</p></section>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <dialog class="solution-dialog" id="solution-dialog" aria-labelledby="solution-dialog-title">
+      <div class="solution-dialog-content">
+        <div class="wizard-header">
+          <div><p class="section-kicker">ROTA DA SOLUÇÃO · DADOS ILUSTRATIVOS</p><h2 id="solution-dialog-title">Solução 01</h2></div>
+          <button class="icon-button" id="close-solution" type="button" aria-label="Fechar visualização da solução">×</button>
+        </div>
+        <p class="panel-description" id="solution-route-description">Ciclo percorrido, incluindo o retorno à cidade de origem.</p>
+        <div class="solution-graph-wrap">
+          <svg id="solution-graph" viewBox="0 0 560 250" role="img" aria-label="Grafo contendo somente os arcos da solução selecionada"></svg>
+        </div>
+        <div class="chart-footnote"><span><i class="legend-line solution-legend"></i>Arcos percorridos</span><span id="solution-objectives"></span></div>
+        <p class="solution-coordinate-note">Posições das cidades preservadas do grafo de análise dos dados.</p>
+      </div>
+    </dialog>
+
+    <dialog class="wizard-dialog" id="instance-wizard" aria-labelledby="wizard-title">
+      <form id="wizard-form">
+        <div class="wizard-header">
+          <div><p class="section-kicker">NOVA INSTÂNCIA <span id="step-label">· ETAPA 1 DE 2</span></p><h2 id="wizard-title">Dados do problema</h2></div>
+          <button class="icon-button" id="close-wizard" type="button" aria-label="Fechar assistente">×</button>
+        </div>
+        <div class="step-indicator" aria-hidden="true"><span class="step-dot current"></span><span class="step-connector"></span><span class="step-dot"></span></div>
+
+        <section class="wizard-step" id="step-one">
+          <label class="form-label" for="problem-type">Tipo do problema</label>
+          <select id="problem-type" name="problem-type"><option value="TSP biobjetivo — tempo vs. distância">TSP biobjetivo · tempo vs. distância</option></select>
+          <p class="form-hint">O catálogo define entradas, algoritmos e visualizações compatíveis.</p>
+          <label class="form-label" for="instance-title">Nome da instância</label>
+          <input id="instance-title" name="instance-title" type="text" value="TSP — Belo Horizonte (teste)" maxlength="100" required>
+          <fieldset class="file-group">
+            <legend>Arquivos CSV das matrizes de adjacência</legend>
+            <input class="sr-only file-input" id="time-file" type="file" accept=".csv,text/csv">
+            <label class="file-label" for="time-file"><span><strong>Matriz de tempo</strong><small id="time-file-name">Nenhum arquivo selecionado · .csv</small></span><span class="button button-light file-button">Selecionar</span></label>
+            <input class="sr-only file-input" id="distance-file" type="file" accept=".csv,text/csv">
+            <label class="file-label" for="distance-file"><span><strong>Matriz de distância</strong><small id="distance-file-name">Nenhum arquivo selecionado · .csv</small></span><span class="button button-light file-button">Selecionar</span></label>
+            <p class="form-hint">Cada CSV deve conter uma matriz quadrada. Os dois arquivos devem ter a mesma ordem de nós.</p>
+          </fieldset>
+          <label class="sample-choice"><input id="sample-files" type="checkbox" checked><span>Usar arquivos de exemplo <small>somente para navegar pelo protótipo</small></span></label>
+          <p class="form-error" id="step-one-error" role="alert" hidden></p>
+        </section>
+
+        <section class="wizard-step" id="step-two" hidden>
+          <div class="config-section"><div class="config-heading"><strong>Análise prévia</strong><small>Selecione pelo menos uma visualização</small></div>
+            <label class="option-row"><input type="checkbox" name="preview" value="graph" checked><span><strong>Grafo de arcos ponderados</strong><small>Exibe nós e pesos das arestas para cada objetivo.</small></span></label>
+            <label class="option-row"><input type="checkbox" name="preview" value="heatmap" checked><span><strong>Heatmaps das matrizes</strong><small>Compara a distribuição dos valores de tempo e distância.</small></span></label>
+          </div>
+          <div class="config-section"><div class="config-heading"><strong>Análise dos resultados</strong><small>Selecione pelo menos uma visualização</small></div>
+            <label class="option-row"><input type="checkbox" name="results" value="pareto" checked><span><strong>Fronteira de Pareto</strong><small>Compara tempo e distância das soluções não dominadas.</small></span></label>
+            <label class="option-row"><input type="checkbox" name="results" value="table" checked><span><strong>Tabela de soluções</strong><small>Lista os objetivos e a relação de dominância.</small></span></label>
+          </div>
+          <fieldset class="config-section model-section"><legend>Modelo / algoritmo</legend>
+            <label class="option-row"><input type="radio" name="algorithm" value="epsilon" checked><span><strong>ε-restrição <em>· exemplo</em></strong><small>Gera alternativas por otimizações sucessivas.</small></span></label>
+            <p class="form-hint">A disponibilidade real depende do catálogo e dos solvers instalados.</p>
+          </fieldset>
+          <p class="form-error" id="step-two-error" role="alert" hidden></p>
+        </section>
+
+        <div class="wizard-actions">
+          <button class="button button-light" id="back-step" type="button" hidden>Voltar</button>
+          <button class="button button-light" id="cancel-wizard" type="button">Cancelar</button>
+          <button class="button button-primary" id="next-step" type="button">Próximo <span aria-hidden="true">→</span></button>
+          <button class="button button-primary" id="create-instance" type="submit" hidden>Criar instância</button>
+        </div>
+      </form>
+    </dialog>
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  </body>
+</html>

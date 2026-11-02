@@ -41,5 +41,6 @@ Os testes unitários estão previstos para utilizar Pytest. Também está previs
 ## Documentação
 
 - [Visão e diretrizes do projeto](visao.md)
+- [Feature: workflow de instâncias](docs/features/workflow_instance/README.md)
 - [Modelos de otimização](docs/UFMG/)
 - [Bibliografia](docs/papers/)
