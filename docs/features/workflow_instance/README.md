@@ -88,11 +88,12 @@ Base: `/api/v1`. JSON usa UTF-8; erros seguem o objeto `{ "error": { "code": "..
 
 | Método e endpoint | Contrato |
 |---|---|
-| `POST /uploads` | `multipart/form-data` com `problem_type_id`, `role` (`time_matrix` ou `distance_matrix`) e um `file`. Validar e armazenar o objeto; responder `201 Created` com `upload_id`, papel, tamanho, SHA-256, `node_count` e `status: "valid"`. Erros de conteúdo são síncronos (`422`); excesso de tamanho retorna `413`. |
+| `POST /uploads` | `multipart/form-data` com `problem_type_id`, `role` (`time_matrix` ou `distance_matrix`) e um `file`. Validar e armazenar o objeto; responder `201 Created` com `upload_id`, papel, tamanho, SHA-256, `node_count` e `status: "valid"`. Erros de conteúdo são síncronos (`422`); excesso de tamanho retorna `413`. Uploads não associados a uma instância expiram após 1 hora. |
 | `POST /instances` | Recebe o tipo, nome, IDs dos dois uploads, confirmação da mesma ordem de nós e configuração; só associa uploads válidos ainda não consumidos/expirados com a mesma dimensão. Responde `201 Created` e estado `ready`. |
-| `GET /instances` | Lista instâncias locais, paginadas. |
+| `GET /instances?limit=50&offset=0` | Lista instâncias locais, paginadas; padrão `limit=50`, máximo 200 e `offset=0`. |
 | `GET /instances/{instance_id}` | Retorna metadados, estado e configuração da instância. |
 | `PATCH /instances/{instance_id}` | Altera somente nome/configuração permitida; não altera arquivos nem a configuração congelada em uma execução. |
+| `DELETE /instances/{instance_id}` | Solicita exclusão da instância e, em cascata, execuções, soluções, notificações relacionadas e arquivos de entrada. Responde `409` se houver execução ativa ou cancelamento pendente; caso contrário, `202` enquanto a remoção do banco e do object storage é concluída. A operação é idempotente e a limpeza de objetos pode ser repetida com segurança. |
 
 Payload de criação:
 
@@ -127,7 +128,7 @@ Payload de criação:
 | Método e endpoint | Contrato |
 |---|---|
 | `POST /instances/{instance_id}/runs` | Cria e enfileira uma execução; exige `Idempotency-Key`; responde `202 Accepted` com `run_id`, estado `queued` e `status_url`. |
-| `GET /instances/{instance_id}/runs` | Lista histórico paginado da instância. |
+| `GET /instances/{instance_id}/runs?limit=50&offset=0` | Lista histórico paginado da instância; padrão `limit=50`, máximo 200 e `offset=0`. |
 | `GET /runs/{run_id}` | Retorna estado, progresso, timestamps e erro sanitizado quando houver. |
 | `POST /runs/{run_id}/cancel` | Solicita cancelamento cooperativo; retorna `202` enquanto aguarda confirmação. |
 
@@ -157,7 +158,7 @@ Exemplo de resposta de estado:
   "algorithm_id": "random-heuristic",
   "status": "running",
   "progress": {
-    "completed": 120,
+    "completed": 6,
     "total": 50,
     "percent": 12
   },
@@ -173,11 +174,11 @@ Estados: `queued`, `running`, `cancel_requested`, `cancelled`, `completed` e `fa
 
 | Método e endpoint | Contrato |
 |---|---|
-| `GET /runs/{run_id}/results?limit=50&offset=0` | Após `completed`, retorna soluções paginadas, valores/unidades e indicador `dominance`; antes disso responde `409` com o estado corrente. |
+| `GET /runs/{run_id}/results?limit=50&offset=0` | Após `completed`, retorna soluções paginadas, valores/unidades e indicador `dominance`; padrão `limit=50`, máximo 200 e `offset=0`. Antes da conclusão responde `409` com o estado corrente. |
 | `GET /runs/{run_id}/solutions/{solution_id}` | Retorna objetivos, valores, estado de dominância e rota ordenada. |
 | `GET /runs/{run_id}/solutions/{solution_id}/graph` | Retorna somente os arcos da solução e coordenadas persistidas da instância. |
 | `GET /runs/{run_id}/solutions/{solution_id}/route.csv` | Baixa `sequence,city_id`, incluindo a repetição da cidade inicial no último registro para fechar o ciclo. |
-| `GET /notifications` | Lista notificações do contexto local, paginadas e com estado de leitura. |
+| `GET /notifications?limit=50&offset=0` | Lista notificações do contexto local, paginadas e com estado de leitura; padrão `limit=50`, máximo 200 e `offset=0`. |
 | `PATCH /notifications/{notification_id}` | Marca a notificação como lida. |
 
 Resultados só são publicados depois que todas as iterações terminarem; uma execução cancelada não expõe amostras parciais como resultado final. A conclusão gera uma notificação persistida ligada à instância e à execução.
@@ -576,8 +577,8 @@ Os nomes, matrizes, grafo, estados do solver e resultados do protótipo são ilu
 
 Na visualização do mockup, o controle começa em 20 vizinhos por cidade e ordena pelo tempo. Como o exemplo tem seis cidades, o limite efetivo é cinco vizinhos por cidade. A disposição fixa A–F é armazenada no estado JavaScript da instância e compartilhada pelo grafo de entrada e pelos grafos de rota. O CSV baixado contém os dados fictícios da solução demonstrativa selecionada.
 
-## Decisões ainda pendentes para a integração
+## Pendências de implementação para a integração
 
-- Definir o produto/versão SILO, a política de retenção e limpeza de uploads/resultados/notificações, e os limites finais de armazenamento.
-- Definir o formato de paginação e a validade dos uploads temporários.
+- Implementar limpeza dos uploads temporários após 1 hora e de objetos órfãos.
+- Implementar `DELETE /instances/{instance_id}` conforme contrato, com exclusão em cascata e limpeza de objetos recuperável/repetível.
 - Implementar autenticação/autorização antes de disponibilizar o serviço a várias pessoas ou a qualquer rede.

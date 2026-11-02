@@ -22,17 +22,67 @@ Plano de tarefas para implementar a especificação em [`README.md`](./README.md
 
 **Saída:** propostas validadas e contratos estáveis para orientar API, domínio e interface.
 
+## Estrutura de pacotes aprovada
+
+```text
+src/
+  api/
+    __init__.py              # create_app(), registro de blueprints e composição Flask
+    settings.py              # Pydantic Settings e leitura de configuração
+    errors.py                # conversão de erros da aplicação para respostas HTTP
+    routes/
+      problem_types.py       # rotas e DTOs HTTP do catálogo
+      uploads.py             # upload e validação de entrada
+      instances.py           # criação e consulta de instâncias/análise prévia
+      runs.py                # execução, status e cancelamento
+      results.py             # soluções, grafos e exportação CSV
+      notifications.py       # listagem e leitura de notificações
+  workflow_instance/
+    domain/                  # entidades e regras de instância, upload, run e notificação
+    application/
+      use_cases/             # criação, validação, otimização, consulta e cancelamento
+      ports/                 # interfaces de repositórios, catálogo, objetos e fila
+  infrastructure/
+    persistence/postgres/    # modelos SQLAlchemy e implementações dos repositórios
+    object_storage/s3/       # adaptador de objetos usando API S3
+    catalog/json/            # leitor do catálogo JSON versionado
+    task_queue/celery/       # configuração de broker e publicação de tarefas
+  worker/
+    celery_app.py            # inicialização do worker e composição dos adaptadores
+    tasks.py                 # tarefas Celery; delegam aos casos de uso
+migrations/                  # revisões Alembic para PostgreSQL
+```
+
+Os pacotes atuais `optimization_problems/`, `monoobjective_algorithms/` e `multiobjective_algorithms/` permanecem no lugar. Os casos de uso chamam esses módulos por suas APIs existentes. Dependências seguem uma direção: `api` e `worker` chamam `application`; `application` aplica regras de `domain` e depende de `ports`; `infrastructure` implementa as portas. `domain` não importa Flask, SQLAlchemy, Celery, SDK S3 ou variáveis de ambiente. DTOs HTTP ficam na API; modelos ORM ficam na infraestrutura; nenhum deles é usado como entidade de domínio.
+
+Manter o início simples: um app factory Flask, blueprints por recurso, casos de uso explícitos e adaptadores injetados na composição da API/worker. Não criar camada genérica de serviços ou repositórios sem necessidade. Testes espelham as fronteiras (`tests/api/`, `tests/workflow_instance/`, `tests/infrastructure/`), com banco/armazenamento reais somente nos testes de integração.
+
 ## Fase 2 — Preparar aplicação e ambiente local
 
-- [ ] Definir a estrutura de pacotes da API Flask, serviços de aplicação, domínio, repositórios e adaptadores externos, mantendo domínio independente de Flask/Celery.
-- [ ] Adicionar configurações externas e validadas para banco, Redis, armazenamento S3, limites de upload e segredos; não versionar credenciais.
-- [ ] Definir retenção e limpeza de uploads/resultados/notificações, validade de uploads temporários e configuração/versão SILO.
+- [x] Definir a estrutura de pacotes da API Flask, serviços de aplicação, domínio, repositórios e adaptadores externos, mantendo domínio independente de Flask/Celery.
+- [x] Escolher Pydantic Settings para configuração validada por ambiente; manter `.env.example` sem valores secretos e não versionar credenciais locais.
+- [x] Escolher SQLAlchemy 2 e Alembic para persistência e migrações PostgreSQL.
+- [x] Definir uploads temporários sem associação a instância com validade de 1 hora; arquivos de instâncias, resultados e notificações permanecem até exclusão explícita.
+- [x] Definir paginação para listas: `limit=50`, máximo 200, `offset=0`.
+- [x] Confirmar limite máximo de 10 MiB por arquivo CSV e a imagem/tag SILO recomendada abaixo.
+- [x] Definir exclusão de instância em cascata; bloquear exclusão enquanto houver execução ativa e executar limpeza de objetos externos de forma repetível.
 - [ ] Implementar migrações versionadas e inicialização repetível do PostgreSQL.
-- [ ] Adicionar serviços Flask, worker Celery, Redis, PostgreSQL e armazenamento S3 compatível (SILO) ao Compose, com volumes persistentes e preparação repetível do bucket.
-- [ ] Definir verificações de saúde e dependências de inicialização para que API e worker só processem tarefas quando seus serviços necessários estiverem disponíveis.
+- [ ] Adicionar serviços Flask, worker Celery, Redis, PostgreSQL e SILO ao Compose, com volumes persistentes e preparação repetível do bucket.
+- [x] Definir publicação local do frontend em `127.0.0.1:8080` e da API em `127.0.0.1:5000`; banco, broker, worker e object storage não publicam portas no host.
+- [ ] Implementar limites/paginação e expiração dos uploads; uploads não associados a uma instância expiram em 1 hora.
+- [x] Definir healthchecks: `pg_isready` para PostgreSQL, `redis-cli ping` para Redis, `GET /minio/health/ready` para SILO (validar com a imagem fixada) e `/health/live`/`/health/ready` na API; API e worker dependem dos serviços necessários.
+- [ ] Implementar os healthchecks e dependências de inicialização no Compose.
 - [ ] Documentar execução, configuração local e comandos de migração/teste.
 
 **Saída:** ambiente integrado inicializável localmente, sem remover a possibilidade de servir o mockup durante o desenvolvimento.
+
+Pydantic Settings deve validar, no mínimo, `DATABASE_URL`, `CELERY_BROKER_URL`, `S3_ENDPOINT_URL`, bucket, credenciais S3, limite de bytes por upload (10 MiB), expiração (3.600 segundos), paginação (50/200), ambiente e porta. Dentro do container, a API escuta em `0.0.0.0:5000`; o mapeamento do host fica restrito a `127.0.0.1:5000`.
+
+### Recomendação de imagem para armazenamento local
+
+Usar a imagem aprovada `docker.io/pgsty/silo:RELEASE.2026-10-26T00-00-00Z`, fixando uma release em vez de `latest`. O repositório oficial do [PGSTY SILO](https://github.com/pgsty/silo) identifica a imagem e a release como multi-arquitetura `amd64`/`arm64`; o [README oficial](https://github.com/pgsty/silo#quick-start) fornece o comando de execução e as variáveis `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD`. A [documentação de compatibilidade](https://silo.pgsty.com/compatibility/server/) recomenda verificar as diferenças do fork antes de substituir MinIO. Testar `/minio/health/ready` como healthcheck de readiness antes de fixá-la no Compose. A configuração da aplicação ainda deve usar API S3 padrão, sem expor SDKs específicos do SILO ao domínio.
+
+Para desenvolvimento local: endpoint S3 interno `http://silo:9000`, console `9001` não publicada no host, diretório de dados montado em volume persistente, credenciais em `.env` ignorado pelo Git, healthcheck do serviço e tarefa de inicialização idempotente para criar o bucket. A tag foi a release publicada mais recente identificada em 02/11/2026; atualizar a imagem exige revisão da release e reteste do adaptador S3.
 
 ## Fase 3 — Catálogo, arquivos e criação de instâncias
 
@@ -42,6 +92,7 @@ Plano de tarefas para implementar a especificação em [`README.md`](./README.md
 - [ ] Implementar validação dos CSVs de tempo e distância: presença, formato, conteúdo numérico finito, matriz quadrada não vazia, dimensões iguais e ordem de nós consistente; retornar arquivo e localização do erro quando possível.
 - [ ] Implementar `POST /uploads` com validação síncrona do CSV na v1, incluindo metadados do upload e erros por tamanho/formato/conteúdo.
 - [ ] Implementar persistência e endpoints de criação, listagem, consulta e edição permitida de instâncias; validar seleção contra o catálogo e associar somente uploads válidos.
+- [ ] Implementar `DELETE /instances/{instance_id}` com exclusão em cascata; rejeitar enquanto houver execução ativa, marcar exclusão solicitada e repetir com segurança a limpeza de arquivos no object storage.
 - [ ] Congelar na instância o tipo/versão de catálogo, configuração selecionada, referências dos arquivos e timestamps.
 
 **Saída:** é possível criar e consultar uma instância válida sem depender de dados fictícios ou de arquivos locais compartilhados entre serviços.
