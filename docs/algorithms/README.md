@@ -80,6 +80,10 @@ Todos os solvers obedecem à mesma assinatura, mas podem declarar capacidades di
 
 Cada heurística deve ter documentação própria em um arquivo Markdown deste diretório, cobrindo seu problema, comportamento, parâmetros, capacidades e limitações.
 
+`NeuroLKH` combina uma SGN treinada no projeto com LKH em C para matrizes
+explícitas. O treinamento, backend e limitações de licença estão descritos em
+[`neuro-lkh.md`](./neuro-lkh.md).
+
 ## Contrato multiobjetivo e fluxo de execução
 
 Os métodos multiobjetivo recebem a instância, as definições dos objetivos (identificador, direção e unidade), os parâmetros do método e uma implementação de `MonoobjectiveSolver`. Eles não conhecem a representação interna da instância nem chamam diretamente uma heurística ou biblioteca de solver. O solver converte o pedido padronizado para o modelo específico da família.
