@@ -86,4 +86,6 @@ Os métodos multiobjetivo recebem a instância, as definições dos objetivos (i
 
 Para ε-restrição, o método escolhe um objetivo principal por chamada e varia os limites dos outros objetivos, invocando `solve` repetidamente pela interface. Soluções retornadas são agregadas, deduplicadas e filtradas pela análise de dominância. Uma solução domina outra quando não é pior em nenhum objetivo, respeitando a direção de cada objetivo, e é estritamente melhor em pelo menos um; qualquer tolerância numérica deve ser explícita e aplicada consistentemente.
 
+A função `non_dominated_mask` em `multiobjective_algorithms.dominance` aplica essa definição a vetores de objetivos e direções explícitas (`minimize` ou `maximize`), retornando uma máscara alinhada às soluções de entrada. Pontos com vetores de objetivos idênticos não dominam uns aos outros e permanecem não dominados.
+
 O serviço de aplicação valida problema, solver, capacidades e parâmetros, executa o método e entrega progresso, cancelamento e resultados ao worker. Flask e Celery não fazem parte dos contratos dos pacotes de algoritmos. Os valores finais dos objetivos e a representação da solução são persistidos pelo fluxo da aplicação, não pelo notebook.

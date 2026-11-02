@@ -15,7 +15,7 @@ A proposta do projeto é permitir que usuários:
 O sistema separa interface, serviços da aplicação e algoritmos para manter baixo acoplamento:
 
 - **Front-end:** HTML, CSS e JavaScript vanilla, sem frameworks; interface para seleção de problemas, envio de arquivos e visualização dos resultados.
-- **API e serviços da aplicação:** Flask para expor os serviços de execução dos modelos e gerenciar os dados das instâncias; Pydantic para especificação e validação dos dados; SQLite como banco de dados inicial.
+- **API e serviços da aplicação:** Flask para expor os serviços de execução dos modelos e gerenciar os dados das instâncias; Pydantic para especificação e validação dos dados; PostgreSQL como banco de dados principal.
 - **`optimization_problems`:** modelos matemáticos implementados em Pyomo, organizados por família de problema e com uma classe builder dedicada para cada modelo.
 - **`monoobjective_algorithms`:** heurísticas e solvers exatos com uma interface comum, separados em subpacotes por família de problemas (por exemplo, TSP).
 - **`multiobjective_algorithms`:** ferramentas de análise multiobjetivo e métodos de geração da fronteira de Pareto, agnósticos às implementações concretas de solver.

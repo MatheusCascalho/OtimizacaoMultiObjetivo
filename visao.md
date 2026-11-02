@@ -21,7 +21,7 @@ O repositório consiste nos seguintes módulos principais:
         * gerenciar os dados de cada instância de otimização;
     * TECNOLOGIAS UTILIZADAS:
         * Flask API;
-        * Banco de dados SQLite;
+        * Banco de dados PostgreSQL;
         * Pydantic para especificação de objetos;
 * DOMAIN:
     * RESPONSABILIDADE:

@@ -22,19 +22,169 @@ O cliente carrega essas opções a partir do catálogo do problema selecionado. 
 
 ### Entrada inicial do catálogo: TSP biobjetivo — tempo vs. distância
 
-- **Objetivos:** minimizar tempo e minimizar distância.
-- **Arquivos:** duas matrizes de adjacência CSV, uma para tempo e outra para distância; cada arquivo é uma matriz quadrada numérica sem cabeçalho. A ordem dos nós deve ser idêntica nos dois arquivos. Não presumir simetria.
+- **Objetivos:** minimizar tempo (horas, `h`) e minimizar distância (quilômetros, `km`).
+- **Arquivos:** duas matrizes de adjacência CSV, uma para tempo e outra para distância; cada arquivo é uma matriz quadrada numérica sem cabeçalho. A ordem dos nós deve ser idêntica nos dois arquivos. Não presumir simetria. O contrato detalhado da primeira versão está em [Contrato de dados e decisões v1](#contrato-de-dados-e-decisoes-v1).
 - **Análise prévia:** grafo de arcos ponderados e heatmap da matriz de cada objetivo. No grafo, permitir configurar quantos vizinhos mais próximos mostrar por cidade; o padrão é 20, ordenado pelo menor tempo (minimizando esse objetivo) e excluindo a diagonal. Limitar a quantidade efetiva a `n - 1`, pois uma cidade não pode ter mais vizinhos do que as demais cidades da matriz. Mostrar claramente a quantidade solicitada e o limite disponível. Em matrizes assimétricas, selecionar os vizinhos de saída por cidade conforme sua própria linha; representar os arcos selecionados com direção. O grafo deve identificar qual peso/unidade está sendo mostrado; os heatmaps devem identificar objetivo, eixos/nós e escala.
-- **Algoritmos:** a lista efetivamente selecionável deve vir das implementações disponíveis para esse tipo de problema. O mockup mostra ε-restrição como exemplo de opção, não como integração ou disponibilidade confirmada.
+- **Algoritmo da primeira versão:** `random-heuristic` (`RandomHeuristic`). Não oferecer ε-restrição ou outro algoritmo até que exista implementação compatível e registrada no catálogo. A heurística gera uma rota por chamada; o serviço de aplicação executa uma quantidade configurada de amostragens, remove rotas duplicadas e calcula quais amostras são não dominadas. A fronteira resultante é uma aproximação baseada nas rotas amostradas, não uma garantia de fronteira ótima/completa.
 - **Análise dos resultados:** fronteira de Pareto (tempo × distância), tabela de soluções com valores/unidades e indicação de dominância. Cada linha oferece **Ver solução**, para desenhar somente os arcos da rota selecionada, e **Baixar resultado**, para exportar a sequência de cidades visitadas em CSV.
 
 As coordenadas das cidades devem ser geradas uma vez para o grafo da instância e persistidas junto à instância/layout. O grafo de cada solução deve reutilizar exatamente esse conjunto de coordenadas; abrir diferentes soluções não deve recalcular a posição dos nós. O CSV de rota contém a ordem e identificador da cidade e inclui o retorno à cidade inicial, formando o ciclo do TSP.
 
-Validações mínimas dos arquivos: extensão/formato aceito, conteúdo numérico finito, matriz não vazia e quadrada, dimensões iguais entre arquivos e correspondência da ordem dos nós. Erros devem apontar arquivo e, quando possível, linha/coluna. A regra para diagonal, separador decimal e limite de tamanho deve ser definida junto ao contrato de dados do domínio antes da integração.
+Validações mínimas dos arquivos: extensão/formato aceito, conteúdo numérico finito e não negativo, matriz quadrada com ao menos dois nós, diagonal zero, dimensões iguais entre arquivos e correspondência da ordem dos nós. Erros devem apontar arquivo e, quando possível, linha/coluna.
+
+## Contrato de dados e decisões v1
+
+Os itens abaixo definem o contrato acordado para a primeira versão. O formato foi conferido contra [`tempo.csv`](../../../data/instances/tempo.csv) e [`distancia.csv`](../../../data/instances/distancia.csv): ambos têm 250 linhas e colunas, sem cabeçalho, usam vírgula e ponto decimal, têm valores finitos não negativos e diagonal zero. Seus tamanhos são 239.506 e 293.136 bytes. O primeiro é assimétrico e o segundo é simétrico; ambos devem ser aceitos.
+
+### Matrizes CSV
+
+| Propriedade | Contrato v1 |
+|---|---|
+| Codificação | UTF-8; aceitar também BOM UTF-8. |
+| Delimitador | Vírgula entre campos. |
+| Decimal | Ponto (`.`); não aceitar vírgula decimal nem separador de milhar. |
+| Estrutura | Sem cabeçalho, exatamente `n` linhas por `n` colunas; ao menos dois nós. Cada célula deve ser numérica, finita e maior ou igual a zero. |
+| Identificadores/ordem | Linhas e colunas representam os nós `1..n` pela posição. Os arquivos não carregam rótulos: o usuário declara que a posição de cada nó corresponde entre as matrizes. |
+| Diagonal | Exigir zero; arcos de uma cidade para si própria não são usados na rota. |
+| Direção | Não exigir simetria. Ler e preservar cada célula `matriz[i][j]` como custo do arco direcionado `i → j`. |
+| Limite | Máximo de 10 MiB por arquivo, configurável no ambiente. Validar o tamanho antes de armazenar e também durante o processamento. |
+| Erros | `422` para conteúdo inválido, com código estável e arquivo/linha/coluna quando identificáveis; `413` para exceder o limite. |
+
+O nome e o tipo MIME fornecidos pelo navegador não substituem a validação do conteúdo. Arquivos de tempo e distância são enviados separadamente e associados pelos papéis `time_matrix` e `distance_matrix`. As unidades não são inferidas dos números: ficam declaradas no catálogo do tipo de problema.
+
+### Algoritmo, amostragem e resultados
+
+- O catálogo da primeira versão oferece somente `random-heuristic`, com nome de exibição **RandomHeuristic**.
+- Cada execução faz **50 amostragens por padrão**; aceitar `iterations` entre 1 e 100.000. Esse parâmetro pertence ao serviço de execução, não à classe da heurística.
+- `seed` é opcional e inteiro. Se omitida, o serviço gera e persiste uma semente efetiva antes de executar; assim cada execução continua reproduzível. O worker mantém uma instância da heurística durante as amostragens para não reiniciar a sequência aleatória em cada chamada.
+- O catálogo descreve `iterations` (inteiro, padrão 50, mínimo 1, máximo 100.000) e `seed` (inteiro opcional); a requisição de execução pode sobrescrever esses parâmetros.
+- Para cada rota única, persistir os dois valores objetivos. Após todas as amostragens, classificar cada rota como `non_dominated` ou `dominated`, considerando minimização de tempo e distância. Manter as soluções dominadas para a tabela; a visualização da fronteira usa somente as não dominadas.
+- Uma execução concluída significa que todas as amostragens solicitadas terminaram. Não implica otimalidade nem garante que todas as soluções não dominadas do espaço de busca foram encontradas.
+
+### Progresso e cancelamento
+
+O progresso representa o trabalho da heurística, não a qualidade ou convergência da solução. Enquanto estiver em fila pode ser `null`; após iniciar, retornar `completed`, `total` e `percent`, por exemplo `6`, `50` e `12`. Calcular `percent` como inteiro arredondado para baixo, exceto ao concluir, quando é 100. Persistir no início, no fim e a cada `max(1, ceil(total / 20))` amostragens concluídas (cerca de 5% do total por atualização), evitando uma gravação no banco por rota na execução padrão.
+
+O worker verifica o pedido de cancelamento entre amostragens. `POST /runs/{run_id}/cancel` responde `202 Accepted` e define `cancel_requested`; o worker interrompe após no máximo a amostragem corrente, persiste `cancelled` e não publica as rotas parciais como resultados finais. Cancelamento repetido enquanto pendente é idempotente; pedidos para execução terminal respondem `409 Conflict`. O cliente só informa cancelamento confirmado após observar `cancelled`.
+
+### Acesso e escopo
+
+**Decisão para v1:** uso local por uma única pessoa, sem autenticação e sem workspaces. Instâncias e notificações pertencem a esse único contexto local; a API não deve ser exposta a uma rede compartilhada. No Compose, publicar portas somente em `127.0.0.1`. Isso evita introduzir uma identidade fictícia agora, mas significa que qualquer processo/usuário com acesso à máquina e à API local pode consultar e alterar os dados.
+
+Antes de disponibilizar o serviço a várias pessoas ou a uma rede, implementar autenticação e autorização: cada instância, arquivo, execução e notificação deve pertencer a um usuário ou workspace; cada endpoint deve verificar esse vínculo, inclusive em downloads e cancelamentos. Essa etapa não deve ser tratada como resolvida pela simples existência de um campo `owner_id`.
+
+## Contratos HTTP para v1
+
+Base: `/api/v1`. JSON usa UTF-8; erros seguem o objeto `{ "error": { "code": "...", "message": "...", "details": [] } }` documentado em [Erros HTTP](#erros-http). O servidor valida todas as regras, mesmo quando a interface já as verificou.
+
+### Catálogo
+
+| Método e endpoint | Contrato |
+|---|---|
+| `GET /problem-types` | Lista os tipos publicados e suas versões. |
+| `GET /problem-types/{problem_type_id}` | Retorna objetivos, arquivos/validações, visualizações e algoritmos disponíveis. Para v1, o TSP publica somente `random-heuristic`. |
+
+### Upload e instâncias
+
+| Método e endpoint | Contrato |
+|---|---|
+| `POST /uploads` | `multipart/form-data` com `problem_type_id`, `role` (`time_matrix` ou `distance_matrix`) e um `file`. Validar e armazenar o objeto; responder `201 Created` com `upload_id`, papel, tamanho, SHA-256, `node_count` e `status: "valid"`. Erros de conteúdo são síncronos (`422`); excesso de tamanho retorna `413`. |
+| `POST /instances` | Recebe o tipo, nome, IDs dos dois uploads, confirmação da mesma ordem de nós e configuração; só associa uploads válidos ainda não consumidos/expirados com a mesma dimensão. Responde `201 Created` e estado `ready`. |
+| `GET /instances` | Lista instâncias locais, paginadas. |
+| `GET /instances/{instance_id}` | Retorna metadados, estado e configuração da instância. |
+| `PATCH /instances/{instance_id}` | Altera somente nome/configuração permitida; não altera arquivos nem a configuração congelada em uma execução. |
+
+Payload de criação:
+
+```json
+{
+  "problem_type_id": "tsp-time-distance",
+  "name": "Minha instância TSP",
+  "files": {
+    "time_matrix": "upload_time_123",
+    "distance_matrix": "upload_distance_456"
+  },
+  "node_order_confirmed": true,
+  "configuration": {
+    "preview": ["weighted_graph", "matrix_heatmap"],
+    "result_views": ["pareto_frontier", "solutions_table"],
+    "algorithm_id": "random-heuristic"
+  }
+}
+```
+
+### Análise prévia
+
+| Método e endpoint | Contrato |
+|---|---|
+| `GET /instances/{instance_id}/analysis/input/graph?objective=time&neighbors_per_city=20` | Retorna metadados do objetivo, quantidade solicitada/efetiva, nós com layout persistido e arcos de saída filtrados por cidade. |
+| `GET /instances/{instance_id}/analysis/input/matrix?objective=time` | Retorna objetivo, unidade, direção, ordem dos nós e matriz para o heatmap. |
+
+`neighbors_per_city` é um inteiro positivo, preferência de visualização que não altera a instância ou a execução. O valor efetivo é `min(requested, n - 1)`. A ordenação é pelo menor custo do objetivo selecionado; o padrão do TSP v1 é `time`.
+
+### Execuções assíncronas
+
+| Método e endpoint | Contrato |
+|---|---|
+| `POST /instances/{instance_id}/runs` | Cria e enfileira uma execução; exige `Idempotency-Key`; responde `202 Accepted` com `run_id`, estado `queued` e `status_url`. |
+| `GET /instances/{instance_id}/runs` | Lista histórico paginado da instância. |
+| `GET /runs/{run_id}` | Retorna estado, progresso, timestamps e erro sanitizado quando houver. |
+| `POST /runs/{run_id}/cancel` | Solicita cancelamento cooperativo; retorna `202` enquanto aguarda confirmação. |
+
+Exemplo de início (iterações omitidas usam o padrão de 50; a semente pode ser fornecida ou gerada pelo serviço):
+
+```http
+POST /api/v1/instances/inst_123/runs
+Idempotency-Key: 60c575c3-...
+Content-Type: application/json
+```
+
+```json
+{
+  "parameters": {
+    "iterations": 50,
+    "seed": 42
+  }
+}
+```
+
+Exemplo de resposta de estado:
+
+```json
+{
+  "run_id": "run_789",
+  "instance_id": "inst_123",
+  "algorithm_id": "random-heuristic",
+  "status": "running",
+  "progress": {
+    "completed": 120,
+    "total": 50,
+    "percent": 12
+  },
+  "created_at": "2026-11-02T19:00:00Z",
+  "started_at": "2026-11-02T19:00:01Z",
+  "finished_at": null
+}
+```
+
+Estados: `queued`, `running`, `cancel_requested`, `cancelled`, `completed` e `failed`. O registro transacional no PostgreSQL é a fonte de estado; Celery/Redis somente transportam tarefas. Reenvio com a mesma chave idempotente e mesmo payload retorna a execução original; mesma chave com payload diferente retorna `409`.
+
+### Resultados e notificações
+
+| Método e endpoint | Contrato |
+|---|---|
+| `GET /runs/{run_id}/results?limit=50&offset=0` | Após `completed`, retorna soluções paginadas, valores/unidades e indicador `dominance`; antes disso responde `409` com o estado corrente. |
+| `GET /runs/{run_id}/solutions/{solution_id}` | Retorna objetivos, valores, estado de dominância e rota ordenada. |
+| `GET /runs/{run_id}/solutions/{solution_id}/graph` | Retorna somente os arcos da solução e coordenadas persistidas da instância. |
+| `GET /runs/{run_id}/solutions/{solution_id}/route.csv` | Baixa `sequence,city_id`, incluindo a repetição da cidade inicial no último registro para fechar o ciclo. |
+| `GET /notifications` | Lista notificações do contexto local, paginadas e com estado de leitura. |
+| `PATCH /notifications/{notification_id}` | Marca a notificação como lida. |
+
+Resultados só são publicados depois que todas as iterações terminarem; uma execução cancelada não expõe amostras parciais como resultado final. A conclusão gera uma notificação persistida ligada à instância e à execução.
 
 ## Fluxo do usuário
 
-1. **Nova Instância:** escolher o tipo do problema, informar um nome e anexar todos os arquivos requeridos pelo catálogo. Para TSP, anexar os CSVs de tempo e distância em campos identificados separadamente. A interface valida presença, tipo e tamanho localmente; o servidor valida o conteúdo.
+1. **Nova Instância:** escolher o tipo do problema, informar um nome e anexar todos os arquivos requeridos pelo catálogo. Para TSP, anexar os CSVs de tempo e distância em campos identificados separadamente e confirmar que linhas/colunas correspondem à mesma ordem de cidades. A interface valida presença, tipo e tamanho localmente; o servidor valida o conteúdo.
 2. **Configuração:** avançar para revisar as visualizações de análise prévia e de resultados e selecionar o modelo/algoritmo. As opções e padrões vêm do tipo de problema. É necessário selecionar pelo menos uma visualização em cada etapa de análise e um algoritmo disponível.
 3. **Criação:** confirmar em **Criar instância**. A instância é persistida com o tipo, nome, arquivos/referências e configuração. Ao concluir a criação, abrir seu dashboard em estado **Pronta para otimização**, apresentando a análise prévia.
 4. **Execução:** **Otimizar** solicita uma execução assíncrona e retorna sem esperar o solver terminar. Mostrar estado, identificador/horário e progresso somente se fornecido pelo serviço. O usuário pode navegar para outras áreas e voltar ao dashboard.
@@ -131,14 +281,13 @@ O catálogo é a fonte de opções da interface. A API valida as opções recebi
 
 | Método e endpoint | Responsabilidade |
 |---|---|
-| `POST /uploads` | Receber um ou mais arquivos via `multipart/form-data`, validar metadados básicos e armazená-los em área temporária. |
-| `GET /uploads/{upload_id}` | Consultar estado, metadados e validade do upload temporário. |
+| `POST /uploads` | Receber um CSV por requisição via `multipart/form-data`, validar o conteúdo sincronamente e armazená-lo em área temporária; retornar `201` com `upload_id` e estado `valid`. |
 | `POST /instances` | Criar a instância associando uploads, tipo e configuração. |
-| `GET /instances` | Listar instâncias acessíveis ao usuário/workspace, com paginação e estado. |
+| `GET /instances` | Listar instâncias do contexto local single-user, com paginação e estado. |
 | `GET /instances/{instance_id}` | Consultar metadados, configuração e estado da instância. |
 | `PATCH /instances/{instance_id}` | Alterar nome/configuração se o estado permitir; não altera arquivos ou configuração usados por uma execução em andamento. |
 
-O upload pode retornar `202 Accepted` quando a validação de conteúdo continuar em background; nesse caso, consultar `GET /uploads/{upload_id}` até ficar pronto ou inválido. A instância só pode ser criada com todos os uploads exigidos pelo tipo em estado válido. Para o TSP, o serviço Python valida que ambas as matrizes sejam quadradas, tenham dimensões e ordem de cidades iguais e contenham pesos numéricos válidos.
+Cada upload declara `problem_type_id` e um papel do catálogo (`time_matrix` ou `distance_matrix`). Para v1, a validação completa ocorre antes da resposta; uploads inválidos retornam `422`, e acima do limite retornam `413`. A instância só pode ser criada com ambos os uploads válidos e com dimensões iguais. Como não há rótulos nos CSVs, a correspondência da ordem é uma declaração do usuário e não pode ser inferida pelo servidor.
 
 Exemplo de criação:
 
@@ -155,16 +304,16 @@ Content-Type: application/json
     "time_matrix": "upload_123",
     "distance_matrix": "upload_456"
   },
+  "node_order_confirmed": true,
   "configuration": {
     "preview": ["weighted_graph", "matrix_heatmap"],
     "result_views": ["pareto_frontier", "solutions_table"],
-    "algorithm_id": "epsilon-constraint",
-    "parameters": {}
+    "algorithm_id": "random-heuristic"
   }
 }
 ```
 
-Resposta `201 Created` inclui a instância criada, estado `ready` e links para sua análise. `algorithm_id` é ilustrativo e só deve ser aceito se estiver disponível no catálogo/ambiente.
+Resposta `201 Created` inclui a instância criada, estado `ready` e links para sua análise. `random-heuristic` é o único algoritmo disponível na primeira versão.
 
 ### Análise dos dados de entrada
 
@@ -180,7 +329,7 @@ Exemplo de resposta do grafo:
   "objective": {
     "id": "time",
     "label": "Tempo",
-    "unit": "min",
+    "unit": "h",
     "direction": "minimize"
   },
   "neighbors_per_city": {
@@ -218,8 +367,10 @@ Content-Type: application/json
 
 ```json
 {
-  "algorithm_id": "epsilon-constraint",
-  "parameters": {}
+  "parameters": {
+    "iterations": 50,
+    "seed": 42
+  }
 }
 ```
 
@@ -255,14 +406,14 @@ Os endpoints de resultados só retornam dados finais quando a execução estiver
 
 | Método e endpoint | Responsabilidade |
 |---|---|
-| `GET /notifications` | Listar notificações do usuário/workspace com paginação e estado de leitura. |
+| `GET /notifications` | Listar notificações do contexto local single-user, paginadas e com estado de leitura. |
 | `PATCH /notifications/{notification_id}` | Marcar uma notificação como lida. |
 
 Ao concluir uma execução, o serviço de aplicação registra uma notificação ligada à instância e à execução. O cliente pode navegar a partir dela para a execução correspondente. A notificação deve ser persistida junto ao armazenamento da aplicação, não somente em Redis.
 
 ### Arquitetura de execução
 
-1. Flask autentica/autorizada a solicitação e executa validações rápidas de contrato e estado.
+1. Na v1 local single-user, Flask valida o contrato e o estado; não há autenticação. A implantação deve ficar vinculada a `127.0.0.1`. Qualquer implantação compartilhada exige autenticação e autorização antes de ser disponibilizada.
 2. Serviços de aplicação/domain validam os dados e regras do problema; não dependem diretamente de Flask ou Celery.
 3. Para processamento demorado, a API registra a execução e envia uma tarefa Celery para Redis, respondendo `202 Accepted`.
 4. Um ou mais workers Celery executam serviços Python de análise/otimização e persistem progresso, resultado e falha no armazenamento da aplicação.
@@ -295,14 +446,14 @@ Os CSVs são validados por serviço Python antes de serem associados a uma inst�
 O PostgreSQL guarda metadados e resultados estruturados. Entidades/tabelas conceituais:
 
 - **Problem type/version:** identificador estável e versão do catálogo correspondente ao arquivo JSON versionado.
-- **Instance:** tipo e versão do catálogo, nome, workspace/proprietário, estado, configuração imutável usada na criação e timestamps.
+- **Instance:** tipo e versão do catálogo, nome, estado, configuração imutável usada na criação e timestamps. O vínculo com usuário/workspace fica fora do escopo da v1 local single-user.
 - **Instance file:** instância, papel no problema (por exemplo, matriz de tempo), chave S3, checksum, tamanho e estado de validação.
 - **City/node layout:** instância, identificador/ordem da cidade e coordenadas. Gerar uma vez e reutilizar nos grafos de entrada e das soluções.
 - **Optimization run:** instância, algoritmo e parâmetros congelados, versão de código/modelo quando disponível, estado, progresso, timestamps e erro sanitizado.
 - **Solution:** execução, identificador, status de dominância e metadados.
 - **Objective value:** solução, identificador do objetivo, valor numérico e unidade/direção referenciadas ao catálogo.
 - **Route stop:** solução, posição e identificador da cidade; preservar a ordem da rota e incluir o retorno à origem no TSP.
-- **Notification:** usuário/workspace, execução/instância relacionada, tipo, estado de leitura e data.
+- **Notification:** execução/instância relacionada, tipo, estado de leitura e data. Pertence ao contexto local único na v1; associar a usuário/workspace quando houver autenticação.
 
 ```mermaid
 erDiagram
@@ -343,7 +494,8 @@ erDiagram
         string run_id
         string status
         json parameters
-        float progress
+        int progress_completed
+        int progress_total
     }
     SOLUTION {
         string solution_id
@@ -369,9 +521,9 @@ Os nomes acima descrevem o modelo lógico; a implementação pode normalizá-lo 
 
 Cada execução deve guardar a configuração efetiva e as versões do catálogo e do algoritmo/modelo, para que alterações futuras não modifiquem a interpretação dos resultados existentes. Redis e o estado interno do backend Celery não substituem o registro transacional da execução no PostgreSQL. Transições de estado e resultados devem ser persistidos pela aplicação/worker; tarefas repetidas devem ser idempotentes em relação ao identificador da execução.
 
-### SQLite e ambientes
+### Banco de dados e ambientes
 
-PostgreSQL é o banco principal da aplicação devido às gravações concorrentes da API e dos workers, transações e consultas relacionais. SQLite permanece adequado para testes unitários isolados ou experimentação local simplificada, mas não será o alvo do ambiente integrado da feature.
+PostgreSQL é o banco principal da aplicação devido às gravações concorrentes da API e dos workers, transações e consultas relacionais. O Compose de desenvolvimento também usa PostgreSQL; SQLite não é o banco de integração da feature.
 
 O compose de desenvolvimento da aplicação deverá orquestrar os serviços necessários — API Flask, worker Celery, Redis, PostgreSQL, serviço S3 compatível SILO e frontend quando aplicável — com volumes persistentes para banco e objetos. Segredos devem ser fornecidos por variáveis/arquivos locais não versionados. Migrações versionadas devem inicializar e evoluir o esquema PostgreSQL; o bucket e suas configurações iniciais devem ser preparados de forma repetível.
 
@@ -392,7 +544,7 @@ Usar corpo padronizado, por exemplo:
 ```
 
 - `400 Bad Request`: formato/parâmetro ausente ou inválido.
-- `401 Unauthorized` / `403 Forbidden`: usuário não autenticado ou sem acesso ao recurso.
+- `401 Unauthorized` / `403 Forbidden`: reservados para quando autenticação/autorização for implementada antes de uma implantação compartilhada; não são estados esperados da API local single-user v1.
 - `404 Not Found`: upload, instância, execução, solução ou notificação inexistente/acessível.
 - `409 Conflict`: operação incompatível com o estado atual, incluindo consulta prematura de resultados.
 - `413 Payload Too Large`: upload acima do limite.
@@ -424,10 +576,8 @@ Os nomes, matrizes, grafo, estados do solver e resultados do protótipo são ilu
 
 Na visualização do mockup, o controle começa em 20 vizinhos por cidade e ordena pelo tempo. Como o exemplo tem seis cidades, o limite efetivo é cinco vizinhos por cidade. A disposição fixa A–F é armazenada no estado JavaScript da instância e compartilhada pelo grafo de entrada e pelos grafos de rota. O CSV baixado contém os dados fictícios da solução demonstrativa selecionada.
 
-## Decisões pendentes para a integração
+## Decisões ainda pendentes para a integração
 
-- Contrato de CSV (codificação, separador, cabeçalho, separador decimal), regra de diagonal e tamanho máximo.
-- Algoritmos e parâmetros realmente disponíveis para cada tipo de problema.
-- Política de cancelamento cooperativo dos workers e formato/periodicidade do progresso.
-- Limites de tamanho/retensão dos arquivos e resultados, autenticação/autorização do workspace e produto/versão SILO a usar no compose de desenvolvimento.
-- Frequência e retenção de notificações, incluindo comportamento com múltiplas execuções por instância.
+- Definir o produto/versão SILO, a política de retenção e limpeza de uploads/resultados/notificações, e os limites finais de armazenamento.
+- Definir o formato de paginação e a validade dos uploads temporários.
+- Implementar autenticação/autorização antes de disponibilizar o serviço a várias pessoas ou a qualquer rede.
