@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f5f4ee">
+    <title>ParetoLab | Exploração de soluções</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Navegação principal">
+        <a class="brand" href="#inicio" aria-label="ParetoLab, início">
+          <svg class="brand-mark" viewBox="0 0 42 42" role="img" aria-label="">
+            <path d="M8 33V8M8 33H35" fill="none" stroke="currentColor" stroke-width="1.7" />
+            <path d="m12 28 8-7 6 2 9-12" fill="none" stroke="currentColor" stroke-width="2.4" />
+            <circle cx="12" cy="28" r="2.4" fill="#d96545" />
+            <circle cx="20" cy="21" r="2.4" fill="#4777a8" />
+            <circle cx="26" cy="23" r="2.4" fill="#28624d" />
+            <circle cx="35" cy="11" r="2.4" fill="#e5b94f" />
+          </svg>
+          <span class="brand-word">pareto<span>lab</span></span>
+        </a>
+
+        <div class="workspace-picker">
+          <span class="workspace-avatar">U</span>
+          <span class="workspace-copy"><strong>Laboratório UFMG</strong><small>Workspace acadêmico</small></span>
+          <span class="picker-caret" aria-hidden="true">⌄</span>
+        </div>
+
+        <p class="nav-label">ESPAÇO DE TRABALHO</p>
+        <nav class="primary-nav">
+          <a class="nav-item" href="#overview"><span class="nav-glyph" aria-hidden="true">◫</span>Visão geral</a>
+          <a class="nav-item active" href="#instancias" aria-current="page"><span class="nav-glyph" aria-hidden="true">⌘</span>Instâncias<span class="nav-count">04</span></a>
+          <a class="nav-item" href="#modelos"><span class="nav-glyph" aria-hidden="true">◇</span>Modelos</a>
+          <a class="nav-item" href="#documentacao"><span class="nav-glyph" aria-hidden="true">▤</span>Documentação</a>
+        </nav>
+
+        <div class="sidebar-bottom">
+          <div class="solver-status"><span class="status-dot"></span><span><strong>Solver conectado</strong><small>GLPK · local</small></span><span class="status-chevron">···</span></div>
+          <a class="nav-item settings-link" href="#configuracoes"><span class="nav-glyph" aria-hidden="true">⚙</span>Configurações</a>
+          <div class="sidebar-footer"><span class="footer-mark">PL</span><span>Laboratório de trabalhos<br>computacionais <b>· 2026/2</b></span></div>
+        </div>
+      </aside>
+
+      <main class="main-content" id="inicio">
+        <header class="topbar">
+          <div class="breadcrumbs"><span>Workspace</span><span class="crumb-separator">/</span><strong>Instâncias</strong></div>
+          <div class="topbar-actions"><button class="text-action" type="button" title="Ajuda">Ajuda <span aria-hidden="true">↗</span></button><span class="topbar-divider"></span><button class="profile-button" type="button" aria-label="Perfil de Marina Costa">MC</button></div>
+        </header>
+
+        <div class="page-wrap">
+          <section class="page-heading">
+            <div>
+              <p class="eyebrow"><span class="eyebrow-line"></span>ESTÚDIO DE OTIMIZAÇÃO <span class="eyebrow-index">01 / 04</span></p>
+              <h1>Instâncias <span>em análise</span></h1>
+              <p class="page-description">Explore alternativas, compare objetivos e encontre soluções que fazem sentido.</p>
+            </div>
+            <button class="button button-primary" id="open-modal" type="button"><span class="button-plus" aria-hidden="true">+</span> Nova instância</button>
+          </section>
+
+          <section class="instance-toolbar" aria-label="Instância selecionada">
+            <div class="instance-identity">
+              <span class="instance-icon" aria-hidden="true">↗</span>
+              <div><span class="micro-label">PROBLEMA DA MOCHILA · DEMONSTRAÇÃO</span><strong id="instance-name">Mochila biobjetivo <span class="instance-id">/ instância 07</span></strong></div>
+            </div>
+            <div class="toolbar-meta"><span class="run-badge"><span class="status-dot"></span>Concluída</span><span class="meta-divider"></span><span class="toolbar-date">Hoje, 14:32</span><button class="icon-button" type="button" aria-label="Mais opções" title="Mais opções">···</button></div>
+          </section>
+
+          <section class="metric-strip" aria-label="Resumo da execução">
+            <div class="metric"><span class="metric-label">SOLUÇÕES FACTÍVEIS</span><div class="metric-value">24 <span class="metric-note">de 128 avaliadas</span></div></div>
+            <div class="metric"><span class="metric-label">OBJETIVOS</span><div class="metric-value objective-values"><span class="objective-dot coral-dot"></span>Custo <span class="metric-amp">×</span><span class="objective-dot blue-dot"></span>Cobertura</div></div>
+            <div class="metric"><span class="metric-label">TEMPO DE EXECUÇÃO</span><div class="metric-value">00:02.48 <span class="metric-note">GLPK · 1 thread</span></div></div>
+            <div class="metric metric-end"><span class="metric-label">FRONTEIRA</span><div class="metric-value">8 <span class="metric-note">não dominadas</span></div></div>
+          </section>
+
+          <section class="analysis-layout" aria-label="Análise de soluções">
+            <div class="analysis-main">
+              <section class="chart-panel panel">
+                <div class="panel-heading chart-heading">
+                  <div><p class="section-kicker">MAPA DE DECISÃO <span class="live-dot"></span></p><h2>Fronteira de Pareto</h2></div>
+                  <div class="chart-controls"><div class="segmented-control" role="tablist" aria-label="Visualização do gráfico"><button class="segment active" id="tab-frontier" type="button" role="tab" aria-selected="true" data-view="frontier">Fronteira</button><button class="segment" id="tab-all" type="button" role="tab" aria-selected="false" data-view="all">Todas</button></div><button class="icon-button chart-menu" type="button" aria-label="Opções do gráfico" title="Opções do gráfico">···</button></div>
+                </div>
+                <div class="chart-legend"><span><i class="legend-dot coral-dot"></i>Objetivo 1 <b>minimizar custo</b></span><span><i class="legend-dot blue-dot"></i>Objetivo 2 <b>maximizar cobertura</b></span><span class="demo-tag">DADOS ILUSTRATIVOS</span></div>
+                <div class="chart-wrap">
+                  <div class="y-axis-title">Cobertura (%) <span>↑</span></div>
+                  <div class="chart-stage">
+                    <canvas id="pareto-chart" aria-label="Gráfico de dispersão da fronteira de Pareto: custo total no eixo horizontal e cobertura no eixo vertical"></canvas>
+                    <div class="chart-tooltip" id="chart-tooltip" role="status" hidden></div>
+                  </div>
+                  <div class="x-axis-title">Custo total (R$) <span>→</span></div>
+                </div>
+                <div class="chart-footnote"><span><span class="key-dot frontier-key"></span>Não dominadas</span><span><span class="key-dot dominated-key"></span>Dominadas</span><span class="chart-footnote-right">Clique em um ponto para selecionar</span></div>
+              </section>
+
+              <section class="solutions-panel panel">
+                <div class="panel-heading solutions-heading">
+                  <div><p class="section-kicker">CONJUNTO DE ALTERNATIVAS</p><h2>Soluções <span class="table-count">24</span></h2></div>
+                  <div class="table-actions"><label class="search-box"><span aria-hidden="true">⌕</span><input id="solution-search" type="search" placeholder="Filtrar soluções" aria-label="Filtrar soluções"></label><button class="button button-light export-button" id="export-csv" type="button"><span aria-hidden="true">↓</span> Exportar</button></div>
+                </div>
+                <div class="table-scroll"><table class="solutions-table"><thead><tr><th scope="col">SOLUÇÃO</th><th scope="col">CUSTO <span class="sort-mark">↑</span></th><th scope="col">COBERTURA</th><th scope="col">STATUS</th><th scope="col"><span class="sr-only">Ação</span></th></tr></thead><tbody id="solutions-body"></tbody></table></div>
+                <div class="table-footer"><span id="table-summary">Mostrando 6 de 24 soluções</span><div class="pagination"><button type="button" aria-label="Página anterior" disabled>←</button><span>1 <i>/</i> 4</span><button type="button" aria-label="Próxima página">→</button></div></div>
+              </section>
+            </div>
+
+            <aside class="detail-rail" aria-label="Detalhes e ações">
+              <section class="selected-panel panel">
+                <div class="panel-heading selected-heading"><div><p class="section-kicker">ALTERNATIVA EM FOCO</p><h2 id="selected-title">Solução 018</h2></div><span class="selected-index">03 <i>/ 08</i></span></div>
+                <div class="selected-chart" aria-hidden="true"><div class="mini-grid"></div><span class="mini-point point-a"></span><span class="mini-point point-b"></span><span class="mini-point point-c"></span><span class="mini-point point-current"></span><span class="mini-path"></span><span class="mini-axis-x">CUSTO</span><span class="mini-axis-y">COBERTURA</span></div>
+                <div class="detail-metrics"><div class="detail-metric"><span><i class="legend-dot coral-dot"></i>Custo total</span><strong id="selected-cost">R$ 18,40</strong></div><div class="detail-metric"><span><i class="legend-dot blue-dot"></i>Cobertura</span><strong id="selected-coverage">82,6%</strong></div><div class="detail-metric"><span>Itens selecionados</span><strong id="selected-items">12 de 20</strong></div></div>
+                <button class="button button-primary compare-button" id="compare-button" type="button"><span aria-hidden="true">⊞</span> Adicionar à comparação</button>
+                <p class="compare-feedback" id="compare-feedback" aria-live="polite"></p>
+              </section>
+
+              <section class="upload-panel panel">
+                <div class="upload-heading"><span class="upload-icon" aria-hidden="true">↑</span><div><h2>Nova instância</h2><p>Comece com seus dados</p></div></div>
+                <label class="drop-zone" for="file-input"><span class="file-mark" aria-hidden="true">↥</span><strong>Solte seu arquivo aqui</strong><span>ou <u>escolha no computador</u></span><small>CSV ou XLSX · até 20 MB</small></label>
+                <input id="file-input" type="file" accept=".csv,.xlsx" hidden>
+                <p class="file-feedback" id="file-feedback" aria-live="polite">Os dados ficam neste protótipo, não são enviados.</p>
+              </section>
+
+              <section class="model-note"><span class="note-mark">i</span><p><strong>Sobre este modelo</strong><br>Exemplo visual de um problema biobjetivo. A formulação real será conectada ao domínio do ParetoLab.</p><a href="#modelos">Ver documentação <span aria-hidden="true">↗</span></a></section>
+            </aside>
+          </section>
+          <footer class="page-footer"><span>PARETOLAB <i>·</i> LABORATÓRIO UFMG</span><span>UMA VISÃO CLARA DOS TRADE-OFFS <b>✳</b></span></footer>
+        </div>
+      </main>
+    </div>
+
+    <dialog class="instance-dialog" id="instance-dialog" aria-labelledby="dialog-title">
+      <form method="dialog" id="instance-form">
+        <div class="dialog-header"><div><p class="section-kicker">COMEÇAR ANÁLISE</p><h2 id="dialog-title">Criar instância</h2></div><button class="icon-button dialog-close" value="cancel" aria-label="Fechar">×</button></div>
+        <label class="form-label" for="problem-type">Tipo de problema</label>
+        <select id="problem-type"><option>Problema da mochila biobjetivo</option><option>Localização de facilidades</option><option>Alocação de recursos</option></select>
+        <label class="form-label" for="instance-title">Nome da instância</label>
+        <input id="instance-title" type="text" placeholder="Ex.: Cenário de referência" required>
+        <div class="dialog-file"><span class="file-mark" aria-hidden="true">↥</span><div><strong>Arquivo de dados</strong><small>CSV ou XLSX · até 20 MB</small></div><label class="button button-light" for="dialog-file-input">Selecionar</label><input id="dialog-file-input" type="file" accept=".csv,.xlsx" hidden></div>
+        <p class="dialog-file-name" id="dialog-file-name">Nenhum arquivo selecionado</p>
+        <div class="dialog-actions"><button class="button button-light" value="cancel">Cancelar</button><button class="button button-primary" id="create-instance" value="default">Criar instância <span aria-hidden="true">→</span></button></div>
+      </form>
+    </dialog>
+  </body>
+</html>
