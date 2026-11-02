@@ -27,7 +27,7 @@
 - `.github/instructions/paretolab-frontend.instructions.md`: regras automáticas para arquivos de `frontend/**`, incluindo identidade, acessibilidade, responsividade e limites do protótipo.
 - `.github/skills/paretolab-ui/SKILL.md`: workflow reutilizável para tarefas de design, implementação e validação da interface.
 - `.github/instructions/dev-report.instructions.md`: instrução criada nesta etapa para padronizar relatórios de conversas futuras.
-- `docs/dev_report/2026-11-02-paretolab-fundacao-01.md`: este relatório.
+- `docs/dev_report/2026-11-02-REP01-paretolab-fundacao.md`: este relatório.
 
 ## Interação com a IA
 
