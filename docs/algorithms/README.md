@@ -23,6 +23,7 @@ src/
       __init__.py
       instance.py
       heuristics/
+        random_heuristic.py
       exact/
   multiobjective_algorithms/
     __init__.py
@@ -76,6 +77,8 @@ class MonoobjectiveSolver(Protocol[InstanceT]):
 `SolveRequest` deve identificar o objetivo principal, seus limites opcionais sobre os demais objetivos e os parâmetros da execução. `SolveResult` deve informar explicitamente o estado da busca e, quando existir, a solução e os valores de seus objetivos; estados como inviável, limite atingido ou falha não podem ser convertidos em uma solução fictícia. O registro da execução conserva `algorithm_id`, parâmetros efetivos e versões relevantes para reprodutibilidade.
 
 Todos os solvers obedecem à mesma assinatura, mas podem declarar capacidades distintas. Por exemplo, ε-restrição exige que o solver aceite limites em objetivos secundários; o serviço deve verificar essa capacidade antes de executar e reportar incompatibilidade claramente, sem fallback silencioso. O cliente seleciona um solver compatível com a família do problema e com as capacidades exigidas pelo método multiobjetivo.
+
+Cada heurística deve ter documentação própria em um arquivo Markdown deste diretório, cobrindo seu problema, comportamento, parâmetros, capacidades e limitações.
 
 ## Contrato multiobjetivo e fluxo de execução
 
