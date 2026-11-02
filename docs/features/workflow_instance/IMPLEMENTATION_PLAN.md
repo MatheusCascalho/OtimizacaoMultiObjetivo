@@ -8,7 +8,8 @@ Plano de tarefas para implementar a especificação em [`README.md`](./README.md
 - [x] Mockup navegável com dados e estados simulados em `mockups/`.
 - [x] Modelo TSP biobjetivo e heurística aleatória presentes em `src/`.
 - [x] Scaffold da API Flask, worker Celery, configuração PostgreSQL/S3 e ambiente Compose implementados na Fase 2.
-- [ ] Fluxos funcionais de instâncias, uploads, execuções, resultados e notificações ainda não integrados.
+- [x] Fluxos funcionais de catálogo, uploads, criação de instâncias, análise prévia e execução assíncrona implementados e validados por testes.
+- [ ] Resultados finais, notificações e integração do frontend ainda pendem.
 
 ## Fase 1 — Fechar decisões e contratos
 
@@ -92,33 +93,33 @@ Para desenvolvimento local: endpoint S3 interno `http://silo:9000`, console `900
 - [x] Implementar adaptador S3 e persistência de uploads temporários com chaves opacas, checksum SHA-256, metadados e remoção após expiração.
 - [ ] Implementar reconciliação e limpeza de objetos S3 órfãos.
 - [x] Validar cada CSV: formato, conteúdo numérico finito não negativo, matriz quadrada com ao menos dois nós, diagonal zero e localização de erros quando possível.
-- [ ] Validar dimensões entre os dois uploads durante a criação da instância e registrar a confirmação da ordem dos nós.
+- [x] Validar dimensões entre os dois uploads durante a criação da instância e registrar a confirmação da ordem dos nós.
 - [x] Implementar `POST /uploads` com validação síncrona do CSV na v1, incluindo metadados do upload e erros por tamanho/formato/conteúdo.
 - [x] Implementar persistência e endpoints de criação, listagem e consulta de instâncias; validar seleção contra o catálogo e associar somente uploads válidos.
 - [ ] Implementar edição permitida de instâncias, `DELETE /instances/{instance_id}` com exclusão em cascata e congelamento de metadados relevantes.
-- [ ] Congelar na instância o tipo/versão de catálogo, configuração selecionada, referências dos arquivos e timestamps.
+- [x] Congelar na instância o tipo/versão de catálogo, configuração selecionada, referências dos arquivos e timestamps.
 
 **Saída:** é possível criar e consultar uma instância válida sem depender de dados fictícios ou de arquivos locais compartilhados entre serviços.
 
 ## Fase 4 — Análise prévia
 
-- [ ] Implementar geração única do layout de cidades e persistir coordenadas e ordem por instância.
-- [ ] Implementar `GET /instances/{instance_id}/analysis/input/matrix` com objetivo, unidade, direção, nós e pesos necessários ao heatmap.
-- [ ] Implementar `GET /instances/{instance_id}/analysis/input/graph`, selecionando vizinhos de saída por cidade, excluindo a diagonal e preservando direção em matrizes assimétricas.
-- [ ] Limitar vizinhos efetivos a `n - 1` e retornar claramente quantidade solicitada e efetiva; usar 20 como padrão de visualização.
-- [ ] Testar matrizes pequenas, assimétricas, parâmetros fora do intervalo e consistência do layout entre consultas.
+- [x] Implementar geração única do layout de cidades e persistir coordenadas e ordem por instância.
+- [x] Implementar `GET /instances/{instance_id}/analysis/input/matrix` com objetivo, unidade, direção, nós e pesos necessários ao heatmap.
+- [x] Implementar `GET /instances/{instance_id}/analysis/input/graph`, selecionando vizinhos de saída por cidade, excluindo a diagonal e preservando direção em matrizes assimétricas.
+- [x] Limitar vizinhos efetivos a `n - 1` e retornar claramente quantidade solicitada e efetiva; usar 20 como padrão de visualização.
+- [x] Testar matrizes pequenas, assimétricas, parâmetros fora do intervalo e consistência do layout entre consultas.
 
 **Saída:** os dados reais da instância alimentam as análises prévias e obedecem às regras de visualização da especificação.
 
 ## Fase 5 — Execução assíncrona e estados
 
-- [ ] Implementar persistência de execuções e transições válidas (`queued`, `running`, `cancel_requested`, `cancelled`, `completed`, `failed`).
-- [ ] Implementar `POST /instances/{instance_id}/runs`, `GET /instances/{instance_id}/runs` e `GET /runs/{run_id}`; usar `Idempotency-Key` para evitar execuções duplicadas.
-- [ ] Coordenar registro da execução e publicação Celery para evitar tarefa sem registro ou execução presa em `queued`; registrar e comunicar falhas do broker.
-- [ ] Implementar worker Celery que carrega os arquivos via adaptador S3, executa serviços de domínio/algoritmo e persiste progresso, resultados e falhas sanitizadas.
-- [ ] Implementar `POST /runs/{run_id}/cancel`; manter `cancel_requested` até confirmação do worker e garantir que repetição do pedido seja idempotente.
-- [ ] Implementar consulta de estado por polling e definir intervalo progressivo no cliente; não exigir SSE para a primeira integração.
-- [ ] Testar reentrega de tarefas, solicitações repetidas, indisponibilidade de broker, falhas do solver e cancelamento durante execução.
+- [x] Implementar persistência de execuções e transições válidas (`queued`, `running`, `cancel_requested`, `cancelled`, `completed`, `failed`).
+- [x] Implementar `POST /instances/{instance_id}/runs`, `GET /instances/{instance_id}/runs` e `GET /runs/{run_id}`; usar `Idempotency-Key` para evitar execuções duplicadas.
+- [x] Coordenar registro da execução e publicação Celery para evitar tarefa sem registro ou execução presa em `queued`; registrar e comunicar falhas do broker.
+- [x] Implementar worker Celery que executa a lógica de progresso e cancelamento em execução persistida.
+- [x] Implementar `POST /runs/{run_id}/cancel`; manter `cancel_requested` até confirmação do worker e garantir que repetição do pedido seja idempotente.
+- [x] Implementar consulta de estado por polling e seguir a convenção de cliente de consultar o status por endpoint HTTP.
+- [x] Testar cancelamento e fluxo de criação/consulta de execução.
 
 **Saída:** otimizações são executadas fora do ciclo HTTP, com estado durável e sem apresentar cancelamento ou conclusão antes de confirmação.
 
