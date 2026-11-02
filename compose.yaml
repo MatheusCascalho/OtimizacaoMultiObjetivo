@@ -81,6 +81,21 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  scheduler:
+    image: paretolab-app:local
+    command: ["python", "-m", "worker.beat"]
+    environment: *app-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      silo:
+        condition: service_healthy
+      bucket-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
   bucket-init:
     image: paretolab-app:local
     command: ["python", "-m", "infrastructure.object_storage.s3.ensure_bucket"]

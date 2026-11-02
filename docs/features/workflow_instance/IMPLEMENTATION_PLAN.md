@@ -69,7 +69,8 @@ Manter o início simples: um app factory Flask, blueprints por recurso, casos de
 - [x] Configurar migrações Alembic versionadas e inicialização automática antes de iniciar a API. A revisão inicial é baseline vazia; migrações das entidades da feature entram junto à persistência da Fase 3.
 - [x] Adicionar serviços Flask, worker Celery, Redis, PostgreSQL e SILO ao Compose, com volumes persistentes e inicialização repetível do bucket.
 - [x] Definir publicação local do frontend em `127.0.0.1:8080` e da API em `127.0.0.1:5000`; banco, broker, worker e object storage não publicam portas no host.
-- [ ] Implementar limites/paginação e expiração dos uploads; uploads não associados a uma instância expiram em 1 hora.
+- [x] Aplicar o limite de bytes por arquivo e expirar uploads temporários não associados após 1 hora.
+- [ ] Aplicar limites e paginação nas listas de instâncias, execuções e notificações.
 - [x] Definir healthchecks: `pg_isready` para PostgreSQL, `redis-cli ping` para Redis, `GET /minio/health/ready` para SILO (validar com a imagem fixada) e `/health/live`/`/health/ready` na API; API e worker dependem dos serviços necessários.
 - [x] Implementar healthchecks e dependências de inicialização no Compose.
 - [x] Documentar execução, configuração local e comandos de migração/teste.
@@ -86,11 +87,13 @@ Para desenvolvimento local: endpoint S3 interno `http://silo:9000`, console `900
 
 ## Fase 3 — Catálogo, arquivos e criação de instâncias
 
-- [ ] Criar catálogo JSON versionado para `tsp-time-distance`, com objetivos/unidades/direções, papéis dos arquivos, análises, algoritmos e parâmetros disponíveis.
-- [ ] Implementar leitura do catálogo e endpoints `GET /problem-types` e `GET /problem-types/{problem_type_id}`.
-- [ ] Implementar adaptador de armazenamento S3 e ciclo de vida de uploads temporários, com chaves opacas, checksum SHA-256, metadados e limpeza de objetos órfãos.
-- [ ] Implementar validação dos CSVs de tempo e distância: presença, formato, conteúdo numérico finito, matriz quadrada não vazia, dimensões iguais e ordem de nós consistente; retornar arquivo e localização do erro quando possível.
-- [ ] Implementar `POST /uploads` com validação síncrona do CSV na v1, incluindo metadados do upload e erros por tamanho/formato/conteúdo.
+- [x] Criar catálogo JSON versionado para `tsp-time-distance`, com objetivos/unidades/direções, papéis dos arquivos, análises, algoritmos e parâmetros disponíveis.
+- [x] Implementar leitura do catálogo e endpoints `GET /problem-types` e `GET /problem-types/{problem_type_id}`.
+- [x] Implementar adaptador S3 e persistência de uploads temporários com chaves opacas, checksum SHA-256, metadados e remoção após expiração.
+- [ ] Implementar reconciliação e limpeza de objetos S3 órfãos.
+- [x] Validar cada CSV: formato, conteúdo numérico finito não negativo, matriz quadrada com ao menos dois nós, diagonal zero e localização de erros quando possível.
+- [ ] Validar dimensões entre os dois uploads durante a criação da instância e registrar a confirmação da ordem dos nós.
+- [x] Implementar `POST /uploads` com validação síncrona do CSV na v1, incluindo metadados do upload e erros por tamanho/formato/conteúdo.
 - [ ] Implementar persistência e endpoints de criação, listagem, consulta e edição permitida de instâncias; validar seleção contra o catálogo e associar somente uploads válidos.
 - [ ] Implementar `DELETE /instances/{instance_id}` com exclusão em cascata; rejeitar enquanto houver execução ativa, marcar exclusão solicitada e repetir com segurança a limpeza de arquivos no object storage.
 - [ ] Congelar na instância o tipo/versão de catálogo, configuração selecionada, referências dos arquivos e timestamps.

@@ -18,5 +18,11 @@ def create_celery_app(settings: Settings) -> Celery:
         task_serializer="json",
         timezone="UTC",
         worker_prefetch_multiplier=1,
+        beat_schedule={
+            "cleanup-expired-uploads": {
+                "task": "worker.cleanup_expired_uploads",
+                "schedule": 300.0,
+            }
+        },
     )
     return celery_app

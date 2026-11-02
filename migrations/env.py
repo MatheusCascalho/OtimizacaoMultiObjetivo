@@ -5,6 +5,7 @@ from sqlalchemy import engine_from_config, pool
 
 from api.settings import Settings
 from infrastructure.persistence.postgres.base import Base
+from infrastructure.persistence.postgres import models as persistence_models
 
 
 config = context.config

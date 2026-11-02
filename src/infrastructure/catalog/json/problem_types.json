@@ -1,0 +1,60 @@
+{
+  "problem_types": [
+    {
+      "id": "tsp-time-distance",
+      "version": "1.0.0",
+      "name": "TSP biobjetivo: tempo e distância",
+      "description": "Encontre rotas que minimizam simultaneamente o tempo e a distância percorrida.",
+      "objectives": [
+        {"id": "time", "name": "Tempo", "unit": "h", "direction": "minimize"},
+        {"id": "distance", "name": "Distância", "unit": "km", "direction": "minimize"}
+      ],
+      "inputs": [
+        {
+          "role": "time_matrix",
+          "name": "Matriz de tempo",
+          "format": "csv",
+          "required": true,
+          "validation": ["numeric_finite_nonnegative", "square", "at_least_two_nodes", "zero_diagonal"]
+        },
+        {
+          "role": "distance_matrix",
+          "name": "Matriz de distância",
+          "format": "csv",
+          "required": true,
+          "validation": ["numeric_finite_nonnegative", "square", "at_least_two_nodes", "zero_diagonal"]
+        }
+      ],
+      "input_analysis": [
+        {
+          "id": "weighted_graph",
+          "name": "Grafo ponderado",
+          "objectives": ["time", "distance"],
+          "default_neighbors_per_city": 20
+        },
+        {
+          "id": "matrix_heatmap",
+          "name": "Mapa de calor da matriz",
+          "objectives": ["time", "distance"]
+        }
+      ],
+      "algorithms": [
+        {
+          "id": "random-heuristic",
+          "name": "RandomHeuristic",
+          "description": "Gera rotas aleatórias para aproximar as soluções não dominadas por amostragem.",
+          "parameters": [
+            {"id": "iterations", "type": "integer", "default": 50, "minimum": 1, "maximum": 100000},
+            {"id": "seed", "type": "integer", "required": false}
+          ]
+        }
+      ],
+      "result_analysis": [
+        {"id": "pareto_frontier", "name": "Fronteira de Pareto", "objectives": ["time", "distance"]},
+        {"id": "solutions_table", "name": "Tabela de soluções"},
+        {"id": "route_graph", "name": "Grafo da rota"},
+        {"id": "route_csv", "name": "Exportação CSV da rota"}
+      ]
+    }
+  ]
+}
