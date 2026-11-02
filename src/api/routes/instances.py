@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -7,7 +8,8 @@ from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from infrastructure.persistence.postgres.models import Instance, InstanceFile, TemporaryUpload
+from infrastructure.persistence.postgres.models import CityLayout, Instance, InstanceFile, TemporaryUpload
+from workflow_instance.domain.matrices import parse_matrix_csv
 
 
 instances_blueprint = Blueprint("instances", __name__, url_prefix="/api/v1")
@@ -26,6 +28,101 @@ def _error(code: str, message: str, status: int, details: list[dict] | None = No
         ),
         status,
     )
+
+
+def _objective_payload(problem_type: dict, objective_id: str) -> dict | None:
+    if not problem_type:
+        return None
+    for objective in problem_type.get("objectives", []):
+        if objective["id"] == objective_id:
+            return {
+                "id": objective["id"],
+                "name": objective["name"],
+                "unit": objective.get("unit"),
+                "direction": objective.get("direction"),
+            }
+    return None
+
+
+def _build_city_layout(node_count: int) -> list[dict[str, float | int]]:
+    if node_count <= 0:
+        return []
+    points: list[dict[str, float | int]] = []
+    for city_index in range(node_count):
+        angle = (2 * math.pi * city_index) / node_count
+        radius = 100.0
+        x = round(100.0 + radius * math.cos(angle), 4)
+        y = round(100.0 + radius * math.sin(angle), 4)
+        points.append({"city_index": city_index, "x": x, "y": y})
+    return points
+
+
+def _ensure_city_layout(instance_id: str, node_count: int, session: Session) -> list[dict[str, float | int]]:
+    existing = session.scalars(
+        select(CityLayout).where(CityLayout.instance_id == instance_id).order_by(CityLayout.city_index.asc())
+    ).all()
+    if len(existing) == node_count:
+        return [{"city_index": row.city_index, "x": row.x, "y": row.y} for row in existing]
+
+    to_delete = session.scalars(select(CityLayout).where(CityLayout.instance_id == instance_id)).all()
+    for row in to_delete:
+        session.delete(row)
+
+    layout_points = _build_city_layout(node_count)
+    for point in layout_points:
+        session.add(
+            CityLayout(
+                id=f"cl_{uuid4().hex}",
+                instance_id=instance_id,
+                city_index=int(point["city_index"]),
+                x=float(point["x"]),
+                y=float(point["y"]),
+            )
+        )
+    session.commit()
+    return layout_points
+
+
+def _get_instance_matrix(instance_id: str, role: str) -> tuple[tuple[float, ...], ...]:
+    engine = current_app.extensions["paretolab_database_engine"]
+    with Session(engine) as session:
+        file_row = session.scalar(
+            select(InstanceFile).where(InstanceFile.instance_id == instance_id, InstanceFile.role == role)
+        )
+        if file_row is None:
+            raise KeyError(f"No {role} matrix file for instance {instance_id}")
+        storage = current_app.extensions["paretolab_object_storage"]
+        content = storage.get(file_row.object_key)
+        matrix = parse_matrix_csv(content, file_row.object_key)
+    return matrix
+
+
+def _instance_payload(instance_id: str, *, include_files: bool = True) -> dict | None:
+    engine = current_app.extensions["paretolab_database_engine"]
+    with Session(engine) as session:
+        instance = session.get(Instance, instance_id)
+        if instance is None:
+            return None
+        files = session.scalars(
+            select(InstanceFile).where(InstanceFile.instance_id == instance_id)
+        ).all()
+    payload = {
+        "instance_id": instance.instance_id,
+        "problem_type_id": instance.problem_type_id,
+        "catalog_version": instance.catalog_version,
+        "name": instance.name,
+        "status": instance.status,
+        "node_count": instance.node_count,
+        "algorithm_id": instance.configuration.get("algorithm_id"),
+        "configuration": instance.configuration,
+        "created_at": instance.created_at.isoformat(),
+    }
+    if include_files:
+        payload["files"] = {
+            row.role: {"upload_id": row.upload_id, "sha256": row.sha256, "size_bytes": row.size_bytes}
+            for row in files
+        }
+    return payload
 
 
 @instances_blueprint.get("/instances")
@@ -186,6 +283,7 @@ def create_instance():
                 )
             )
             upload.consumed_at = now
+        layout_points = _ensure_city_layout(instance_id, time_upload_node_count, session)
         session.commit()
 
     return (
@@ -202,9 +300,116 @@ def create_instance():
                     role: {"upload_id": upload_id}
                     for role, upload_id in upload_ids.items()
                 },
+                "layout": layout_points,
                 "configuration": response_configuration,
                 "created_at": now.isoformat(),
             }
         ),
         201,
+    )
+
+
+@instances_blueprint.get("/instances/<instance_id>/analysis/input/matrix")
+def get_instance_analysis_matrix(instance_id: str):
+    objective_id = request.args.get("objective", "time")
+    engine = current_app.extensions["paretolab_database_engine"]
+    with Session(engine) as session:
+        instance = session.get(Instance, instance_id)
+        if instance is None:
+            return _error("instance_not_found", "A instância solicitada não existe.", 404)
+        catalog = current_app.extensions["paretolab_catalog"]
+        problem_type = catalog.get_problem_type(instance.problem_type_id)
+        if problem_type is None:
+            return _error("problem_type_not_found", "O tipo de problema associado não foi encontrado.", 404)
+        objective = _objective_payload(problem_type, objective_id)
+        if objective is None:
+            return _error(
+                "unsupported_objective",
+                "O objetivo solicitado não está disponível para este tipo de problema.",
+                422,
+            )
+        role = f"{objective_id}_matrix"
+        try:
+            matrix = _get_instance_matrix(instance_id, role)
+        except KeyError:
+            return _error("missing_instance_matrix", "A matriz solicitada não está disponível para a instância.", 404)
+        layout = _ensure_city_layout(instance_id, instance.node_count, session)
+
+    response_nodes = [
+        {"id": city_index + 1, "label": str(city_index + 1), "x": point["x"], "y": point["y"]}
+        for city_index, point in enumerate(layout)
+    ]
+    return (
+        jsonify(
+            {
+                "instance_id": instance_id,
+                "objective": objective,
+                "nodes": response_nodes,
+                "matrix": [list(row) for row in matrix],
+            }
+        ),
+        200,
+    )
+
+
+@instances_blueprint.get("/instances/<instance_id>/analysis/input/graph")
+def get_instance_analysis_graph(instance_id: str):
+    objective_id = request.args.get("objective", "time")
+    neighbors_per_city = request.args.get("neighbors_per_city", default="20", type=int)
+    if neighbors_per_city is None or neighbors_per_city < 1:
+        return _error("invalid_neighbors_per_city", "O número de vizinhos deve ser maior que zero.", 422)
+
+    engine = current_app.extensions["paretolab_database_engine"]
+    with Session(engine) as session:
+        instance = session.get(Instance, instance_id)
+        if instance is None:
+            return _error("instance_not_found", "A instância solicitada não existe.", 404)
+        catalog = current_app.extensions["paretolab_catalog"]
+        problem_type = catalog.get_problem_type(instance.problem_type_id)
+        if problem_type is None:
+            return _error("problem_type_not_found", "O tipo de problema associado não foi encontrado.", 404)
+        objective = _objective_payload(problem_type, objective_id)
+        if objective is None:
+            return _error(
+                "unsupported_objective",
+                "O objetivo solicitado não está disponível para este tipo de problema.",
+                422,
+            )
+        role = f"{objective_id}_matrix"
+        try:
+            matrix = _get_instance_matrix(instance_id, role)
+        except KeyError:
+            return _error("missing_instance_matrix", "A matriz solicitada não está disponível para a instância.", 404)
+        layout = _ensure_city_layout(instance_id, instance.node_count, session)
+
+    effective_neighbors = min(neighbors_per_city, max(instance.node_count - 1, 0))
+    edges: list[dict[str, int | float]] = []
+    for city_index, row in enumerate(matrix):
+        ranked = [
+            (target_index, value)
+            for target_index, value in enumerate(row)
+            if target_index != city_index and value >= 0
+        ]
+        ranked.sort(key=lambda item: (item[1], item[0]))
+        for target_index, value in ranked[:effective_neighbors]:
+            edges.append({"source": city_index + 1, "target": target_index + 1, "weight": float(value)})
+
+    response_nodes = [
+        {"id": city_index + 1, "label": str(city_index + 1), "x": point["x"], "y": point["y"]}
+        for city_index, point in enumerate(layout)
+    ]
+    return (
+        jsonify(
+            {
+                "instance_id": instance_id,
+                "objective": objective,
+                "neighbors_per_city": {
+                    "requested": neighbors_per_city,
+                    "effective": effective_neighbors,
+                },
+                "nodes": response_nodes,
+                "edges": edges,
+            }
+        ),
+        200,
     )
