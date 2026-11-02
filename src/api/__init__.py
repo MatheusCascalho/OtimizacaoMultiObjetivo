@@ -3,6 +3,7 @@ from sqlalchemy.engine import Engine
 
 from api.routes.health import health_blueprint
 from api.routes.instances import instances_blueprint
+from api.routes.notifications import notifications_blueprint
 from api.routes.problem_types import problem_types_blueprint
 from api.routes.runs import runs_blueprint
 from api.routes.uploads import uploads_blueprint
@@ -36,6 +37,7 @@ def create_app(settings: Settings | None = None) -> Flask:
     app.register_blueprint(uploads_blueprint)
     app.register_blueprint(instances_blueprint)
     app.register_blueprint(runs_blueprint)
+    app.register_blueprint(notifications_blueprint)
 
     return app
 

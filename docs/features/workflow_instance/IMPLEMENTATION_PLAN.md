@@ -125,13 +125,13 @@ Para desenvolvimento local: endpoint S3 interno `http://silo:9000`, console `900
 
 ## Fase 6 — Resultados e notificações
 
-- [ ] Persistir soluções, valores dos objetivos, dominância e rota ordenada; guardar versões de catálogo/algoritmo e parâmetros efetivos por execução.
-- [ ] Implementar endpoints paginados para resumo e soluções, disponíveis somente após estado `completed`.
-- [ ] Implementar consulta de solução e grafo da rota usando apenas seus arcos e o layout persistido da instância.
-- [ ] Implementar exportação CSV da rota, com sequência ordenada, identificador da cidade e retorno à origem.
-- [ ] Implementar persistência e endpoints de notificações (`GET /notifications`, `PATCH /notifications/{notification_id}`), associadas à instância e à execução.
-- [ ] Garantir que execução cancelada ou falha não habilite resultados finais e que os erros do serviço sejam apresentados sem stack traces.
-- [ ] Testar paginação, dominância, fidelidade do layout, conteúdo/headers do CSV e acesso prematuro a resultados.
+- [x] Persistir soluções, valores dos objetivos, dominância e rota ordenada; guardar versões de catálogo/algoritmo e parâmetros efetivos por execução.
+- [x] Implementar endpoints paginados para resumo e soluções, disponíveis somente após estado `completed`.
+- [x] Implementar consulta de solução e grafo da rota usando apenas seus arcos e o layout persistido da instância.
+- [x] Implementar exportação CSV da rota, com sequência ordenada, identificador da cidade e retorno à origem.
+- [x] Implementar persistência e endpoints de notificações (`GET /notifications`, `PATCH /notifications/{notification_id}`), associadas à instância e à execução.
+- [x] Garantir que execução cancelada ou falha não habilite resultados finais e que os erros do serviço sejam apresentados sem stack traces.
+- [x] Testar paginação, dominância, fidelidade do layout, conteúdo/headers do CSV e acesso prematuro a resultados.
 
 **Saída:** resultados finais reproduzíveis, consultáveis e exportáveis; conclusão gera notificação persistente.
 

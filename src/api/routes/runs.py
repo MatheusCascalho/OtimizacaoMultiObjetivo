@@ -7,7 +7,7 @@ from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from infrastructure.persistence.postgres.models import Instance, Run
+from infrastructure.persistence.postgres.models import Instance, Notification, Run, RunSolution
 
 
 runs_blueprint = Blueprint("runs", __name__, url_prefix="/api/v1")
@@ -169,3 +169,113 @@ def cancel_run(run_id: str):
         response["status"] = "cancel_requested"
         response["status_url"] = f"/api/v1/runs/{run.run_id}"
         return jsonify(response), 202
+
+
+@runs_blueprint.get("/runs/<run_id>/results")
+def get_run_results(run_id: str):
+    limit = min(int(request.args.get("limit", 50)), 200)
+    offset = max(int(request.args.get("offset", 0)), 0)
+    engine = current_app.extensions["paretolab_database_engine"]
+    with Session(engine) as session:
+        run = session.get(Run, run_id)
+        if run is None:
+            return _error("run_not_found", "A execução solicitada não existe.", 404)
+        if run.status != "completed":
+            return _error("run_not_completed", "Os resultados só estão disponíveis após a conclusão da execução.", 409)
+
+        rows = session.scalars(
+            select(RunSolution)
+            .where(RunSolution.run_id == run_id)
+            .order_by(RunSolution.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        ).all()
+        payload = {
+            "run_id": run.run_id,
+            "instance_id": run.instance_id,
+            "status": run.status,
+            "solutions": [
+                {
+                    "solution_id": row.solution_id,
+                    "objective_values": row.objective_values,
+                    "route": row.route,
+                    "dominance": row.dominance,
+                    "created_at": row.created_at.isoformat(),
+                }
+                for row in rows
+            ],
+            "limit": limit,
+            "offset": offset,
+        }
+    return jsonify(payload), 200
+
+
+@runs_blueprint.get("/runs/<run_id>/solutions/<solution_id>")
+def get_run_solution(run_id: str, solution_id: str):
+    engine = current_app.extensions["paretolab_database_engine"]
+    with Session(engine) as session:
+        run = session.get(Run, run_id)
+        if run is None:
+            return _error("run_not_found", "A execução solicitada não existe.", 404)
+        if run.status != "completed":
+            return _error("run_not_completed", "Os resultados só estão disponíveis após a conclusão da execução.", 409)
+
+        solution = session.get(RunSolution, solution_id)
+        if solution is None or solution.run_id != run_id:
+            return _error("solution_not_found", "A solução solicitada não existe para esta execução.", 404)
+
+        payload = {
+            "solution_id": solution.solution_id,
+            "run_id": solution.run_id,
+            "instance_id": solution.instance_id,
+            "objective_values": solution.objective_values,
+            "route": solution.route,
+            "dominance": solution.dominance,
+            "created_at": solution.created_at.isoformat(),
+        }
+    return jsonify(payload), 200
+
+
+@runs_blueprint.get("/runs/<run_id>/solutions/<solution_id>/graph")
+def get_run_solution_graph(run_id: str, solution_id: str):
+    engine = current_app.extensions["paretolab_database_engine"]
+    with Session(engine) as session:
+        run = session.get(Run, run_id)
+        if run is None:
+            return _error("run_not_found", "A execução solicitada não existe.", 404)
+        if run.status != "completed":
+            return _error("run_not_completed", "Os resultados só estão disponíveis após a conclusão da execução.", 409)
+        solution = session.get(RunSolution, solution_id)
+        if solution is None or solution.run_id != run_id:
+            return _error("solution_not_found", "A solução solicitada não existe para esta execução.", 404)
+
+        route = solution.route or []
+        edges = []
+        for index in range(len(route) - 1):
+            source = route[index]
+            target = route[index + 1]
+            edges.append({"source": source, "target": target})
+        payload = {"solution_id": solution.solution_id, "route": route, "edges": edges}
+    return jsonify(payload), 200
+
+
+@runs_blueprint.get("/runs/<run_id>/solutions/<solution_id>/route.csv")
+def get_run_solution_csv(run_id: str, solution_id: str):
+    engine = current_app.extensions["paretolab_database_engine"]
+    with Session(engine) as session:
+        run = session.get(Run, run_id)
+        if run is None:
+            return _error("run_not_found", "A execução solicitada não existe.", 404)
+        if run.status != "completed":
+            return _error("run_not_completed", "Os resultados só estão disponíveis após a conclusão da execução.", 409)
+        solution = session.get(RunSolution, solution_id)
+        if solution is None or solution.run_id != run_id:
+            return _error("solution_not_found", "A solução solicitada não existe para esta execução.", 404)
+
+        rows = ["sequence,city_id"]
+        for sequence, city_id in enumerate(solution.route):
+            rows.append(f"{sequence},{city_id}")
+        if solution.route and solution.route[0] != solution.route[-1]:
+            rows.append(f"{len(solution.route)},{solution.route[0]}")
+    return "\n".join(rows), 200, {"Content-Type": "text/csv; charset=utf-8"}
+
