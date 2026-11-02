@@ -94,8 +94,8 @@ Para desenvolvimento local: endpoint S3 interno `http://silo:9000`, console `900
 - [x] Validar cada CSV: formato, conteúdo numérico finito não negativo, matriz quadrada com ao menos dois nós, diagonal zero e localização de erros quando possível.
 - [ ] Validar dimensões entre os dois uploads durante a criação da instância e registrar a confirmação da ordem dos nós.
 - [x] Implementar `POST /uploads` com validação síncrona do CSV na v1, incluindo metadados do upload e erros por tamanho/formato/conteúdo.
-- [ ] Implementar persistência e endpoints de criação, listagem, consulta e edição permitida de instâncias; validar seleção contra o catálogo e associar somente uploads válidos.
-- [ ] Implementar `DELETE /instances/{instance_id}` com exclusão em cascata; rejeitar enquanto houver execução ativa, marcar exclusão solicitada e repetir com segurança a limpeza de arquivos no object storage.
+- [x] Implementar persistência e endpoints de criação, listagem e consulta de instâncias; validar seleção contra o catálogo e associar somente uploads válidos.
+- [ ] Implementar edição permitida de instâncias, `DELETE /instances/{instance_id}` com exclusão em cascata e congelamento de metadados relevantes.
 - [ ] Congelar na instância o tipo/versão de catálogo, configuração selecionada, referências dos arquivos e timestamps.
 
 **Saída:** é possível criar e consultar uma instância válida sem depender de dados fictícios ou de arquivos locais compartilhados entre serviços.

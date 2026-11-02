@@ -2,6 +2,7 @@ from flask import Flask
 from sqlalchemy.engine import Engine
 
 from api.routes.health import health_blueprint
+from api.routes.instances import instances_blueprint
 from api.routes.problem_types import problem_types_blueprint
 from api.routes.uploads import uploads_blueprint
 from api.settings import Settings
@@ -32,6 +33,7 @@ def create_app(settings: Settings | None = None) -> Flask:
     app.register_blueprint(health_blueprint)
     app.register_blueprint(problem_types_blueprint)
     app.register_blueprint(uploads_blueprint)
+    app.register_blueprint(instances_blueprint)
 
     return app
 
