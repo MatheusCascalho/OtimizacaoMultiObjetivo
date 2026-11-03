@@ -58,6 +58,13 @@ para a instancia real de 250 nos. Para avaliar o uso real, gere um corpus que
 represente a distribuicao das matrizes do projeto e compare rotas e custos com
 baselines.
 
+## Notebook de demonstracao
+
+O notebook [`neuro_lkh_tsp.ipynb`](../../notebooks/neuro_lkh_tsp.ipynb) mostra
+um fluxo autocontido de treino curto, chamada ao Elkai/LKH, validacao da rota e
+comparacao com o rotulo exato em uma instancia sintetica pequena. Ele e
+demonstrativo; nao representa uma configuracao de treino para producao.
+
 ## Backend e limitacoes
 
 O backend e o pacote [`elkai`](https://github.com/fikisipi/elkai), que expõe
