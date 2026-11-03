@@ -1,5 +1,5 @@
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from flask import Flask
@@ -47,6 +47,7 @@ def app() -> Iterator[Flask]:
 
 
 def _seed_uploads(session: Session) -> tuple[str, str]:
+    now = datetime.now(UTC)
     time_upload = TemporaryUpload(
         id="upl_time",
         problem_type_id="tsp-time-distance",
@@ -59,8 +60,8 @@ def _seed_uploads(session: Session) -> tuple[str, str]:
         content_type="text/csv",
         node_count=2,
         status="valid",
-        created_at=datetime(2026, 11, 2, tzinfo=UTC),
-        expires_at=datetime(2026, 11, 2, 1, tzinfo=UTC),
+        created_at=now,
+        expires_at=now + timedelta(hours=1),
     )
     distance_upload = TemporaryUpload(
         id="upl_distance",
@@ -74,8 +75,8 @@ def _seed_uploads(session: Session) -> tuple[str, str]:
         content_type="text/csv",
         node_count=2,
         status="valid",
-        created_at=datetime(2026, 11, 2, tzinfo=UTC),
-        expires_at=datetime(2026, 11, 2, 1, tzinfo=UTC),
+        created_at=now,
+        expires_at=now + timedelta(hours=1),
     )
     session.add_all([time_upload, distance_upload])
     session.commit()
@@ -115,6 +116,12 @@ def test_analysis_input_matrix_and_graph_are_available_for_instance(app: Flask) 
     assert graph_response.json["neighbors_per_city"]["effective"] == 1
     assert len(graph_response.json["edges"]) == 2
     assert {edge["source"] for edge in graph_response.json["edges"]} == {1, 2}
+
+    default_graph_response = app.test_client().get(
+        f"/api/v1/instances/{instance_id}/analysis/input/graph?objective=time"
+    )
+    assert default_graph_response.status_code == 200
+    assert default_graph_response.json["neighbors_per_city"] == {"requested": 20, "effective": 1}
 
     with Session(app.extensions["paretolab_database_engine"]) as session:
         layouts = session.scalars(select(CityLayout).where(CityLayout.instance_id == instance_id)).all()

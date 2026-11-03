@@ -67,6 +67,23 @@ def test_run_creation_and_cancel_cycle(app: Flask) -> None:
     run_id = create_response.json["run_id"]
     assert create_response.json["status"] == "queued"
     assert create_response.json["status_url"] == f"/api/v1/runs/{run_id}"
+    assert create_response.json["parameters"] == {"iterations": 25, "seed": 7}
+
+    duplicate_response = client.post(
+        "/api/v1/instances/inst_runs_1/runs",
+        headers={"Idempotency-Key": "idem-001"},
+        json={"parameters": {"iterations": 25, "seed": 7}},
+    )
+    assert duplicate_response.status_code == 202
+    assert duplicate_response.json["run_id"] == run_id
+
+    concurrent_response = client.post(
+        "/api/v1/instances/inst_runs_1/runs",
+        headers={"Idempotency-Key": "idem-002"},
+        json={"parameters": {"iterations": 25, "seed": 7}},
+    )
+    assert concurrent_response.status_code == 409
+    assert concurrent_response.json["error"]["code"] == "instance_run_active"
 
     list_response = client.get("/api/v1/instances/inst_runs_1/runs")
     assert list_response.status_code == 200
@@ -83,6 +100,46 @@ def test_run_creation_and_cancel_cycle(app: Flask) -> None:
 
     with Session(app.extensions["paretolab_database_engine"]) as session:
         run = session.scalar(select(Run).where(Run.run_id == run_id))
+        instance = session.get(Instance, "inst_runs_1")
     assert run is not None
     assert run.status == "cancel_requested"
     assert run.idempotency_key == "idem-001"
+    assert instance is not None
+    assert instance.status == "cancel_requested"
+
+
+def test_run_rejects_invalid_parameters_and_pagination(app: Flask) -> None:
+    with Session(app.extensions["paretolab_database_engine"]) as session:
+        session.add(
+            Instance(
+                instance_id="inst_runs_invalid",
+                problem_type_id="tsp-time-distance",
+                catalog_version="1.0.0",
+                name="Instância inválida",
+                status="ready",
+                configuration={"algorithm_id": "random-heuristic"},
+                node_count=3,
+            )
+        )
+        session.commit()
+
+    client = app.test_client()
+    invalid_run = client.post(
+        "/api/v1/instances/inst_runs_invalid/runs",
+        headers={"Idempotency-Key": "idem-invalid"},
+        json={"parameters": {"iterations": 0}},
+    )
+    assert invalid_run.status_code == 422
+    assert invalid_run.json["error"]["code"] == "invalid_iterations"
+
+    invalid_page = client.get("/api/v1/instances/inst_runs_invalid/runs?offset=-1")
+    assert invalid_page.status_code == 422
+    assert invalid_page.json["error"]["code"] == "invalid_pagination"
+
+    invalid_payload = client.post(
+        "/api/v1/instances/inst_runs_invalid/runs",
+        headers={"Idempotency-Key": "idem-invalid-payload"},
+        json={"parameters": []},
+    )
+    assert invalid_payload.status_code == 422
+    assert invalid_payload.json["error"]["code"] == "invalid_run_parameters"

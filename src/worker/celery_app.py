@@ -22,7 +22,11 @@ def create_celery_app(settings: Settings) -> Celery:
             "cleanup-expired-uploads": {
                 "task": "worker.cleanup_expired_uploads",
                 "schedule": 300.0,
-            }
+            },
+            "cleanup-orphaned-objects": {
+                "task": "worker.reconcile_orphaned_objects",
+                "schedule": 3600.0,
+            },
         },
     )
     return celery_app

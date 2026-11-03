@@ -11,6 +11,8 @@ class S3Client(Protocol):
 
     def delete_object(self, **kwargs: object) -> object: ...
 
+    def list_objects_v2(self, **kwargs: object) -> Mapping[str, object]: ...
+
 
 class S3ObjectBody(Protocol):
     def read(self) -> bytes: ...
@@ -48,3 +50,22 @@ class S3ObjectStorage:
 
     def delete(self, key: str) -> None:
         self._client.delete_object(Bucket=self._bucket, Key=key)
+
+    def list_objects(self, prefix: str) -> list[dict[str, object]]:
+        objects: list[dict[str, object]] = []
+        continuation_token = None
+        while True:
+            request: dict[str, object] = {"Bucket": self._bucket, "Prefix": prefix}
+            if continuation_token:
+                request["ContinuationToken"] = continuation_token
+            response = self._client.list_objects_v2(**request)
+            objects.extend(
+                {"key": item["Key"], "last_modified": item.get("LastModified")}
+                for item in response.get("Contents", [])
+            )
+            if not response.get("IsTruncated"):
+                break
+            continuation_token = response.get("NextContinuationToken")
+            if not continuation_token:
+                break
+        return objects

@@ -5,10 +5,19 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from flask import Blueprint, current_app, jsonify, request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from infrastructure.persistence.postgres.models import CityLayout, Instance, InstanceFile, TemporaryUpload
+from api.pagination import get_pagination_args
+from infrastructure.persistence.postgres.models import (
+    CityLayout,
+    Instance,
+    InstanceFile,
+    Notification,
+    Run,
+    RunSolution,
+    TemporaryUpload,
+)
 from workflow_instance.domain.matrices import parse_matrix_csv
 
 
@@ -127,10 +136,13 @@ def _instance_payload(instance_id: str, *, include_files: bool = True) -> dict |
 
 @instances_blueprint.get("/instances")
 def list_instances():
-    limit = min(int(request.args.get("limit", 50)), 200)
-    offset = max(int(request.args.get("offset", 0)), 0)
+    pagination = get_pagination_args()
+    if pagination is None:
+        return _error("invalid_pagination", "Use limit entre 1 e 200 e offset maior ou igual a zero.", 422)
+    limit, offset = pagination
     engine = current_app.extensions["paretolab_database_engine"]
     with Session(engine) as session:
+        total = session.scalar(select(func.count()).select_from(Instance)) or 0
         rows = session.scalars(
             select(Instance).order_by(Instance.created_at.desc()).limit(limit).offset(offset)
         ).all()
@@ -150,10 +162,120 @@ def list_instances():
                 ],
                 "limit": limit,
                 "offset": offset,
+                "total": total,
             }
         ),
         200,
     )
+
+
+@instances_blueprint.patch("/instances/<instance_id>")
+def update_instance(instance_id: str):
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return _error("invalid_instance_update", "O corpo deve ser um objeto JSON.", 422)
+    if not payload or set(payload) - {"name", "configuration"}:
+        return _error("invalid_instance_update", "Altere somente name e/ou configuration.", 422)
+
+    engine = current_app.extensions["paretolab_database_engine"]
+    with Session(engine) as session:
+        instance = session.get(Instance, instance_id)
+        if instance is None:
+            return _error("instance_not_found", "A instância solicitada não existe.", 404)
+        if instance.status == "deleting":
+            return _error("instance_unavailable", "A instância está sendo excluída.", 409)
+        if "name" in payload:
+            name = payload["name"]
+            if not isinstance(name, str) or not name.strip() or len(name.strip()) > 255:
+                return _error("invalid_instance_name", "O nome deve conter de 1 a 255 caracteres.", 422)
+            instance.name = name.strip()
+        if "configuration" in payload:
+            runs = session.scalar(select(func.count()).select_from(Run).where(Run.instance_id == instance_id)) or 0
+            if runs:
+                return _error("instance_configuration_frozen", "A configuração não pode mudar após iniciar uma execução.", 409)
+            configuration = payload["configuration"]
+            if not isinstance(configuration, dict):
+                return _error("invalid_instance_configuration", "configuration deve ser um objeto.", 422)
+            preview = configuration.get("preview", [])
+            result_views = configuration.get("result_views", [])
+            if not isinstance(preview, list) or not isinstance(result_views, list):
+                return _error("invalid_instance_configuration", "preview e result_views devem ser listas.", 422)
+            catalog = current_app.extensions["paretolab_catalog"]
+            problem_type = catalog.get_problem_type(instance.problem_type_id)
+            algorithm_ids = {item["id"] for item in (problem_type or {}).get("algorithms", [])}
+            input_analysis = {item["id"] for item in (problem_type or {}).get("input_analysis", [])}
+            result_analysis = {item["id"] for item in (problem_type or {}).get("result_analysis", [])}
+            if configuration.get("algorithm_id") not in algorithm_ids:
+                return _error("unsupported_algorithm", "O algoritmo não está disponível para este tipo de problema.", 422)
+            if not set(preview) <= input_analysis:
+                return _error("unsupported_preview", "Uma visualização prévia não está disponível no catálogo.", 422)
+            if not set(result_views) <= result_analysis:
+                return _error("unsupported_result_view", "Uma visualização de resultados não está disponível no catálogo.", 422)
+            instance.configuration = configuration
+        instance.updated_at = datetime.now(UTC)
+        session.commit()
+        response = {
+            "instance_id": instance.instance_id,
+            "problem_type_id": instance.problem_type_id,
+            "catalog_version": instance.catalog_version,
+            "name": instance.name,
+            "status": instance.status,
+            "node_count": instance.node_count,
+            "algorithm_id": instance.configuration.get("algorithm_id"),
+            "configuration": instance.configuration,
+            "created_at": instance.created_at.isoformat(),
+            "updated_at": instance.updated_at.isoformat(),
+        }
+    return jsonify(response), 200
+
+
+@instances_blueprint.delete("/instances/<instance_id>")
+def delete_instance(instance_id: str):
+    engine = current_app.extensions["paretolab_database_engine"]
+    with Session(engine) as session:
+        instance = session.get(Instance, instance_id)
+        if instance is None:
+            return jsonify({"instance_id": instance_id, "status": "deleted"}), 202
+        runs = session.scalars(select(Run).where(Run.instance_id == instance_id)).all()
+        if any(run.status in {"queued", "running", "cancel_requested"} for run in runs):
+            return _error("instance_has_active_run", "Cancele ou aguarde as execuções ativas antes de excluir a instância.", 409)
+        instance.status = "deleting"
+        session.commit()
+        run_ids = [run.run_id for run in runs]
+        files = session.scalars(select(InstanceFile).where(InstanceFile.instance_id == instance_id)).all()
+        upload_ids = [file.upload_id for file in files]
+        object_keys = {file.object_key for file in files}
+        uploads = session.scalars(select(TemporaryUpload).where(TemporaryUpload.id.in_(upload_ids))).all() if upload_ids else []
+        object_keys.update(upload.object_key for upload in uploads)
+
+    storage = current_app.extensions["paretolab_object_storage"]
+    try:
+        for object_key in object_keys:
+            storage.delete(object_key)
+    except Exception:
+        current_app.logger.exception("Could not remove instance objects for %s", instance_id)
+        return _error("instance_storage_cleanup_failed", "A limpeza dos arquivos falhou; a exclusão pode ser repetida.", 503)
+
+    with Session(engine) as session:
+        current = session.get(Instance, instance_id)
+        if current is None:
+            return jsonify({"instance_id": instance_id, "status": "deleted"}), 202
+        if run_ids:
+            for solution in session.scalars(select(RunSolution).where(RunSolution.run_id.in_(run_ids))).all():
+                session.delete(solution)
+            for notification in session.scalars(select(Notification).where(Notification.instance_id == instance_id)).all():
+                session.delete(notification)
+            for run in session.scalars(select(Run).where(Run.run_id.in_(run_ids))).all():
+                session.delete(run)
+        for layout in session.scalars(select(CityLayout).where(CityLayout.instance_id == instance_id)).all():
+            session.delete(layout)
+        for file in session.scalars(select(InstanceFile).where(InstanceFile.instance_id == instance_id)).all():
+            session.delete(file)
+        for upload in session.scalars(select(TemporaryUpload).where(TemporaryUpload.id.in_(upload_ids))).all() if upload_ids else []:
+            session.delete(upload)
+        session.delete(current)
+        session.commit()
+    return jsonify({"instance_id": instance_id, "status": "deleted"}), 202
 
 
 @instances_blueprint.get("/instances/<instance_id>")
@@ -191,15 +313,23 @@ def get_instance(instance_id: str):
 
 @instances_blueprint.post("/instances")
 def create_instance():
-    payload = request.get_json(silent=True) or {}
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return _error("invalid_instance_payload", "O corpo deve ser um objeto JSON.", 422)
     problem_type_id = payload.get("problem_type_id")
     name = payload.get("name")
-    files = payload.get("files") or {}
+    files = payload.get("files", {})
     node_order_confirmed = payload.get("node_order_confirmed")
-    configuration = payload.get("configuration") or {}
+    configuration = payload.get("configuration", {})
 
-    if not problem_type_id or not name:
+    if not problem_type_id or not isinstance(name, str) or not name.strip() or len(name.strip()) > 255:
         return _error("missing_instance_fields", "Informe o tipo do problema e o nome da instância.", 400)
+    if files is None:
+        files = {}
+    if configuration is None:
+        configuration = {}
+    if not isinstance(files, dict) or not isinstance(configuration, dict):
+        return _error("invalid_instance_payload", "files e configuration devem ser objetos.", 422)
     if node_order_confirmed is not True:
         return _error("node_order_not_confirmed", "Confirme a ordem dos nós antes de criar a instância.", 422)
 
@@ -213,6 +343,17 @@ def create_instance():
     if algorithm_id not in available_algorithms:
         return _error("unsupported_algorithm", "O algoritmo selecionado não está disponível para este tipo de problema.", 422)
 
+    preview = configuration.get("preview", ["weighted_graph", "matrix_heatmap"])
+    result_views = configuration.get("result_views", ["pareto_frontier", "solutions_table"])
+    if not isinstance(preview, list) or not isinstance(result_views, list):
+        return _error("invalid_instance_configuration", "preview e result_views devem ser listas.", 422)
+    input_analysis = {item["id"] for item in problem_type.get("input_analysis", [])}
+    result_analysis = {item["id"] for item in problem_type.get("result_analysis", [])}
+    if not preview or not set(preview) <= input_analysis:
+        return _error("unsupported_preview", "Selecione visualizações prévias disponíveis no catálogo.", 422)
+    if not result_views or not set(result_views) <= result_analysis:
+        return _error("unsupported_result_view", "Selecione visualizações de resultados disponíveis no catálogo.", 422)
+
     upload_ids = {
         "time_matrix": files.get("time_matrix"),
         "distance_matrix": files.get("distance_matrix"),
@@ -222,13 +363,16 @@ def create_instance():
 
     engine = current_app.extensions["paretolab_database_engine"]
     response_configuration = {
-        "preview": (request.get_json(silent=True) or {}).get("configuration", {}).get("preview", []),
-        "result_views": (request.get_json(silent=True) or {}).get("configuration", {}).get("result_views", []),
-        "algorithm_id": (request.get_json(silent=True) or {}).get("configuration", {}).get("algorithm_id"),
+        "preview": preview,
+        "result_views": result_views,
+        "algorithm_id": algorithm_id,
     }
+    now = datetime.now(UTC)
     with Session(engine) as session:
         uploads = session.scalars(
-            select(TemporaryUpload).where(TemporaryUpload.id.in_([upload for upload in upload_ids.values() if upload]))
+            select(TemporaryUpload)
+            .where(TemporaryUpload.id.in_([upload for upload in upload_ids.values() if upload]))
+            .with_for_update()
         ).all()
         upload_by_id = {upload.id: upload for upload in uploads}
         missing = [role for role, upload_id in upload_ids.items() if upload_id not in upload_by_id]
@@ -243,6 +387,13 @@ def create_instance():
                 return _error("upload_role_mismatch", "O papel do upload não corresponde ao role requisitado.", 422)
             if upload.status != "valid":
                 return _error("invalid_upload_status", "O upload não está em estado válido.", 422)
+            if upload.consumed_at is not None:
+                return _error("upload_already_consumed", "O upload já está associado a uma instância.", 409)
+            expires_at = upload.expires_at
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=UTC)
+            if expires_at <= now:
+                return _error("upload_expired", "O upload expirou; envie o arquivo novamente.", 410)
 
         time_upload = upload_by_id[upload_ids["time_matrix"]]
         distance_upload = upload_by_id[upload_ids["distance_matrix"]]
@@ -255,12 +406,11 @@ def create_instance():
 
         time_upload_node_count = time_upload.node_count
         instance_id = f"inst_{uuid4().hex}"
-        now = datetime.now(UTC)
         instance = Instance(
             instance_id=instance_id,
             problem_type_id=problem_type_id,
             catalog_version=problem_type["version"],
-            name=name,
+            name=name.strip(),
             status="ready",
             configuration=response_configuration,
             node_count=time_upload_node_count,
@@ -355,7 +505,7 @@ def get_instance_analysis_matrix(instance_id: str):
 @instances_blueprint.get("/instances/<instance_id>/analysis/input/graph")
 def get_instance_analysis_graph(instance_id: str):
     objective_id = request.args.get("objective", "time")
-    neighbors_per_city = request.args.get("neighbors_per_city", default="20", type=int)
+    neighbors_per_city = request.args.get("neighbors_per_city", default=20, type=int)
     if neighbors_per_city is None or neighbors_per_city < 1:
         return _error("invalid_neighbors_per_city", "O número de vizinhos deve ser maior que zero.", 422)
 

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from flask import Blueprint, current_app, jsonify, request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from api.pagination import get_pagination_args
 from infrastructure.persistence.postgres.models import Notification
 
 
@@ -27,10 +28,13 @@ def _error(code: str, message: str, status: int, details: list[dict] | None = No
 
 @notifications_blueprint.get("/notifications")
 def list_notifications():
-    limit = min(int(request.args.get("limit", 50)), 200)
-    offset = max(int(request.args.get("offset", 0)), 0)
+    pagination = get_pagination_args()
+    if pagination is None:
+        return _error("invalid_pagination", "Use limit entre 1 e 200 e offset maior ou igual a zero.", 422)
+    limit, offset = pagination
     engine = current_app.extensions["paretolab_database_engine"]
     with Session(engine) as session:
+        total = session.scalar(select(func.count()).select_from(Notification)) or 0
         rows = session.scalars(
             select(Notification).order_by(Notification.created_at.desc()).limit(limit).offset(offset)
         ).all()
@@ -49,6 +53,7 @@ def list_notifications():
             ],
             "limit": limit,
             "offset": offset,
+            "total": total,
         }
     return jsonify(payload), 200
 

@@ -39,6 +39,25 @@ def test_liveness_does_not_depend_on_external_services(app: Flask) -> None:
     assert response.json == {"status": "live"}
 
 
+def test_cors_allows_loopback_frontend_without_credentials(app: Flask) -> None:
+    response = app.test_client().get(
+        "/health/live",
+        headers={"Origin": "http://127.0.0.1:8080"},
+    )
+
+    assert response.headers["Access-Control-Allow-Origin"] == "http://127.0.0.1:8080"
+    assert "Access-Control-Allow-Credentials" not in response.headers
+
+
+def test_cors_does_not_allow_remote_origins(app: Flask) -> None:
+    response = app.test_client().get(
+        "/health/live",
+        headers={"Origin": "https://example.com"},
+    )
+
+    assert "Access-Control-Allow-Origin" not in response.headers
+
+
 def test_readiness_reports_available_dependencies(
     app: Flask,
     monkeypatch: pytest.MonkeyPatch,

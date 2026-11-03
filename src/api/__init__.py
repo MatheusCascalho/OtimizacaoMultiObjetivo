@@ -1,3 +1,5 @@
+from urllib.parse import urlparse
+
 from flask import Flask, request
 from sqlalchemy.engine import Engine
 
@@ -23,12 +25,17 @@ def create_app(settings: Settings | None = None) -> Flask:
     @app.after_request
     def add_cors_headers(response):
         origin = request.headers.get("Origin")
-        response.headers["Access-Control-Allow-Origin"] = origin or "*"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = (
-            "Content-Type, Authorization, X-Requested-With, Idempotency-Key"
-        )
-        response.headers["Access-Control-Allow-Credentials"] = "true"
+        if origin:
+            parsed_origin = urlparse(origin)
+            if parsed_origin.scheme in {"http", "https"} and parsed_origin.hostname in {
+                "localhost",
+                "127.0.0.1",
+                "::1",
+            }:
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, DELETE, OPTIONS"
+                response.headers["Access-Control-Allow-Headers"] = "Content-Type, Idempotency-Key"
+                response.vary.add("Origin")
         return response
 
     engine: Engine = create_engine(application_settings)

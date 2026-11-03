@@ -50,7 +50,7 @@
       <main class="main-content" id="inicio">
         <header class="topbar">
           <div class="breadcrumbs"><span>Workspace</span><span class="crumb-separator">/</span><strong>Instâncias</strong></div>
-          <div class="topbar-actions"><button class="text-action" type="button" title="Ajuda">Ajuda <span aria-hidden="true">↗</span></button><span class="topbar-divider"></span><button class="profile-button" type="button" aria-label="Perfil de Marina Costa">MC</button></div>
+          <div class="topbar-actions"><button class="text-action" id="notifications-button" type="button" aria-label="Notificações, 0 não lidas">Notificações <span class="notification-count" id="notification-count">0</span></button><button class="text-action" type="button" title="Ajuda">Ajuda <span aria-hidden="true">↗</span></button><span class="topbar-divider"></span><button class="profile-button" type="button" aria-label="Perfil de Marina Costa">MC</button></div>
         </header>
 
         <div class="page-wrap">
@@ -68,14 +68,19 @@
               <span class="instance-icon" aria-hidden="true">↗</span>
               <div><span class="micro-label">PROBLEMA DA MOCHILA · DEMONSTRAÇÃO</span><strong id="instance-name">Mochila biobjetivo <span class="instance-id">/ instância 07</span></strong></div>
             </div>
-            <div class="toolbar-meta"><span class="run-badge"><span class="status-dot"></span>Concluída</span><span class="meta-divider"></span><span class="toolbar-date">Hoje, 14:32</span><button class="icon-button" type="button" aria-label="Mais opções" title="Mais opções">···</button></div>
+            <div class="toolbar-meta"><label class="instance-select-label"><span class="sr-only">Instância</span><select id="instance-selector" aria-label="Selecionar instância"><option value="">Nenhuma instância</option></select></label><span class="run-badge"><span class="status-dot"></span>Dados ilustrativos</span><span class="meta-divider"></span><span class="toolbar-date">Protótipo</span><button class="button button-primary run-button" id="start-run" type="button" disabled>Otimizar</button><button class="button button-light run-button" id="cancel-run" type="button" hidden>Cancelar</button></div>
           </section>
 
           <section class="metric-strip" aria-label="Resumo da execução">
-            <div class="metric"><span class="metric-label">SOLUÇÕES FACTÍVEIS</span><div class="metric-value">24 <span class="metric-note">de 128 avaliadas</span></div></div>
-            <div class="metric"><span class="metric-label">OBJETIVOS</span><div class="metric-value objective-values"><span class="objective-dot coral-dot"></span>Custo <span class="metric-amp">×</span><span class="objective-dot blue-dot"></span>Cobertura</div></div>
-            <div class="metric"><span class="metric-label">TEMPO DE EXECUÇÃO</span><div class="metric-value">00:02.48 <span class="metric-note">GLPK · 1 thread</span></div></div>
-            <div class="metric metric-end"><span class="metric-label">FRONTEIRA</span><div class="metric-value">8 <span class="metric-note">não dominadas</span></div></div>
+            <div class="metric"><span class="metric-label">SOLUÇÕES ÚNICAS</span><div class="metric-value" id="metric-solutions">-- <span class="metric-note">aguardando execução</span></div></div>
+            <div class="metric"><span class="metric-label">OBJETIVOS</span><div class="metric-value objective-values"><span class="objective-dot coral-dot"></span>Distância <span class="metric-amp">×</span><span class="objective-dot blue-dot"></span>Tempo</div></div>
+            <div class="metric"><span class="metric-label">PROGRESSO</span><div class="metric-value" id="metric-progress">-- <span class="metric-note">sem execução</span></div></div>
+            <div class="metric metric-end"><span class="metric-label">FRONTEIRA</span><div class="metric-value" id="metric-frontier">-- <span class="metric-note">não dominadas</span></div></div>
+          </section>
+
+          <section class="input-preview panel" id="input-preview" aria-labelledby="input-preview-title" hidden>
+            <div class="panel-heading preview-heading"><div><p class="section-kicker">INSPEÇÃO DOS DADOS</p><h2 id="input-preview-title">Análise prévia</h2></div><div class="segmented-control" role="group" aria-label="Objetivo da análise prévia"><button class="segment active" type="button" data-objective="time">Tempo</button><button class="segment" type="button" data-objective="distance">Distância</button></div></div>
+            <div class="preview-content"><div class="preview-graph"><div class="preview-graph-heading"><p class="metric-label">GRAFO · <span id="preview-objective-label">TEMPO</span></p><label class="neighbor-control" for="neighbors-per-city">Vizinhos/cidade <input id="neighbors-per-city" type="number" min="1" value="20" step="1"></label><span class="metric-label" id="preview-neighbor-count"></span></div><canvas id="input-graph" role="img" aria-label="Grafo da instância"></canvas></div><div class="preview-matrix"><p class="metric-label">MATRIZ · <span id="matrix-objective-label">TEMPO</span> <span id="matrix-size"></span> <span id="matrix-scale"></span></p><div class="matrix-scroll"><table id="matrix-table" class="matrix-table"></table></div></div></div>
           </section>
 
           <section class="analysis-layout" aria-label="Análise de soluções">
@@ -85,14 +90,14 @@
                   <div><p class="section-kicker">MAPA DE DECISÃO <span class="live-dot"></span></p><h2>Fronteira de Pareto</h2></div>
                   <div class="chart-controls"><div class="segmented-control" role="tablist" aria-label="Visualização do gráfico"><button class="segment active" id="tab-frontier" type="button" role="tab" aria-selected="true" data-view="frontier">Fronteira</button><button class="segment" id="tab-all" type="button" role="tab" aria-selected="false" data-view="all">Todas</button></div><button class="icon-button chart-menu" type="button" aria-label="Opções do gráfico" title="Opções do gráfico">···</button></div>
                 </div>
-                <div class="chart-legend"><span><i class="legend-dot coral-dot"></i>Objetivo 1 <b>minimizar custo</b></span><span><i class="legend-dot blue-dot"></i>Objetivo 2 <b>maximizar cobertura</b></span><span class="demo-tag">DADOS ILUSTRATIVOS</span></div>
+                <div class="chart-legend"><span><i class="legend-dot coral-dot"></i>Distância <b>minimizar · km</b></span><span><i class="legend-dot blue-dot"></i>Tempo <b>minimizar · h</b></span><span class="demo-tag" id="data-mode-tag">DADOS ILUSTRATIVOS</span></div>
                 <div class="chart-wrap">
-                  <div class="y-axis-title">Cobertura (%) <span>↑</span></div>
+                  <div class="y-axis-title">Tempo (h) <span>↑</span></div>
                   <div class="chart-stage">
-                    <canvas id="pareto-chart" aria-label="Gráfico de dispersão da fronteira de Pareto: custo total no eixo horizontal e cobertura no eixo vertical"></canvas>
+                    <canvas id="pareto-chart" aria-label="Gráfico da fronteira de Pareto com tempo em horas no eixo vertical e distância em quilômetros no eixo horizontal"></canvas>
                     <div class="chart-tooltip" id="chart-tooltip" role="status" hidden></div>
                   </div>
-                  <div class="x-axis-title">Custo total (R$) <span>→</span></div>
+                  <div class="x-axis-title">Distância (km) <span>→</span></div>
                 </div>
                 <div class="chart-footnote"><span><span class="key-dot frontier-key"></span>Não dominadas</span><span><span class="key-dot dominated-key"></span>Dominadas</span><span class="chart-footnote-right">Clique em um ponto para selecionar</span></div>
               </section>
@@ -102,28 +107,28 @@
                   <div><p class="section-kicker">CONJUNTO DE ALTERNATIVAS</p><h2>Soluções <span class="table-count">24</span></h2></div>
                   <div class="table-actions"><label class="search-box"><span aria-hidden="true">⌕</span><input id="solution-search" type="search" placeholder="Filtrar soluções" aria-label="Filtrar soluções"></label><button class="button button-light export-button" id="export-csv" type="button"><span aria-hidden="true">↓</span> Exportar</button></div>
                 </div>
-                <div class="table-scroll"><table class="solutions-table"><thead><tr><th scope="col">SOLUÇÃO</th><th scope="col">CUSTO <span class="sort-mark">↑</span></th><th scope="col">COBERTURA</th><th scope="col">STATUS</th><th scope="col"><span class="sr-only">Ação</span></th></tr></thead><tbody id="solutions-body"></tbody></table></div>
-                <div class="table-footer"><span id="table-summary">Mostrando 6 de 24 soluções</span><div class="pagination"><button type="button" aria-label="Página anterior" disabled>←</button><span>1 <i>/</i> 4</span><button type="button" aria-label="Próxima página">→</button></div></div>
+                <div class="table-scroll"><table class="solutions-table"><thead><tr><th scope="col">SOLUÇÃO</th><th scope="col">DISTÂNCIA (km)</th><th scope="col">TEMPO (h)</th><th scope="col">STATUS</th><th scope="col"><span class="sr-only">Ação</span></th></tr></thead><tbody id="solutions-body"></tbody></table></div>
+                <div class="table-footer"><span id="table-summary">Dados ilustrativos do protótipo</span><div class="pagination"><button id="previous-page" type="button" aria-label="Página anterior" disabled>←</button><span id="page-indicator">1</span><button id="next-page" type="button" aria-label="Próxima página" disabled>→</button></div></div>
               </section>
             </div>
 
             <aside class="detail-rail" aria-label="Detalhes e ações">
               <section class="selected-panel panel">
-                <div class="panel-heading selected-heading"><div><p class="section-kicker">ALTERNATIVA EM FOCO</p><h2 id="selected-title">Solução 018</h2></div><span class="selected-index">03 <i>/ 08</i></span></div>
-                <div class="selected-chart" aria-hidden="true"><div class="mini-grid"></div><span class="mini-point point-a"></span><span class="mini-point point-b"></span><span class="mini-point point-c"></span><span class="mini-point point-current"></span><span class="mini-path"></span><span class="mini-axis-x">CUSTO</span><span class="mini-axis-y">COBERTURA</span></div>
-                <div class="detail-metrics"><div class="detail-metric"><span><i class="legend-dot coral-dot"></i>Custo total</span><strong id="selected-cost">R$ 18,40</strong></div><div class="detail-metric"><span><i class="legend-dot blue-dot"></i>Cobertura</span><strong id="selected-coverage">82,6%</strong></div><div class="detail-metric"><span>Itens selecionados</span><strong id="selected-items">12 de 20</strong></div></div>
-                <button class="button button-primary compare-button" id="compare-button" type="button"><span aria-hidden="true">⊞</span> Adicionar à comparação</button>
+                <div class="panel-heading selected-heading"><div><p class="section-kicker">ALTERNATIVA EM FOCO</p><h2 id="selected-title">Nenhuma selecionada</h2></div></div>
+                <div class="selected-chart"><canvas id="route-chart" role="img" aria-label="Gráfico da rota selecionada; selecione Ver rota para carregar os dados"></canvas></div>
+                <div class="detail-metrics"><div class="detail-metric"><span><i class="legend-dot coral-dot"></i>Distância</span><strong id="selected-cost">-- km</strong></div><div class="detail-metric"><span><i class="legend-dot blue-dot"></i>Tempo</span><strong id="selected-coverage">-- h</strong></div><div class="detail-metric"><span>Cidades na rota</span><strong id="selected-items">--</strong></div></div>
+                <button class="button button-primary compare-button" id="view-route" type="button" disabled><span aria-hidden="true">⌖</span> Ver rota</button>
+                <button class="button button-light compare-button route-download" id="download-route" type="button" disabled><span aria-hidden="true">↓</span> Baixar rota CSV</button>
                 <p class="compare-feedback" id="compare-feedback" aria-live="polite"></p>
               </section>
 
               <section class="upload-panel panel">
-                <div class="upload-heading"><span class="upload-icon" aria-hidden="true">↑</span><div><h2>Nova instância</h2><p>Comece com seus dados</p></div></div>
-                <label class="drop-zone" for="file-input"><span class="file-mark" aria-hidden="true">↥</span><strong>Solte seu arquivo aqui</strong><span>ou <u>escolha no computador</u></span><small>CSV ou XLSX · até 20 MB</small></label>
-                <input id="file-input" type="file" accept=".csv,.xlsx" hidden>
-                <p class="file-feedback" id="file-feedback" aria-live="polite">Os dados ficam neste protótipo, não são enviados.</p>
+                <div class="upload-heading"><span class="upload-icon" aria-hidden="true">＋</span><div><h2>Instância</h2><p>Crie um novo conjunto de dados</p></div></div>
+                <button class="button button-light create-instance-shortcut" id="open-modal-secondary" type="button">Adicionar matrizes CSV</button>
+                <p class="file-feedback">TSP biobjetivo · tempo e distância</p>
               </section>
 
-              <section class="model-note"><span class="note-mark">i</span><p><strong>Sobre este modelo</strong><br>Exemplo visual de um problema biobjetivo. A formulação real será conectada ao domínio do ParetoLab.</p><a href="#modelos">Ver documentação <span aria-hidden="true">↗</span></a></section>
+              <section class="model-note"><span class="note-mark">i</span><p><strong>TSP biobjetivo</strong><br>A RandomHeuristic amostra rotas e aproxima a fronteira; não garante ótimo global.</p><a href="#modelos">Ver documentação <span aria-hidden="true">↗</span></a></section>
             </aside>
           </section>
           <footer class="page-footer"><span>PARETOLAB <i>·</i> LABORATÓRIO UFMG</span><span>UMA VISÃO CLARA DOS TRADE-OFFS <b>✳</b></span></footer>
@@ -135,13 +140,23 @@
       <form method="dialog" id="instance-form">
         <div class="dialog-header"><div><p class="section-kicker">COMEÇAR ANÁLISE</p><h2 id="dialog-title">Criar instância</h2></div><button class="icon-button dialog-close" value="cancel" aria-label="Fechar">×</button></div>
         <label class="form-label" for="problem-type">Tipo de problema</label>
-        <select id="problem-type"><option>Problema da mochila biobjetivo</option><option>Localização de facilidades</option><option>Alocação de recursos</option></select>
+        <select id="problem-type"><option value="tsp-time-distance">TSP biobjetivo: tempo e distância</option></select>
         <label class="form-label" for="instance-title">Nome da instância</label>
         <input id="instance-title" type="text" placeholder="Ex.: Cenário de referência" required>
-        <div class="dialog-file"><span class="file-mark" aria-hidden="true">↥</span><div><strong>Arquivo de dados</strong><small>CSV ou XLSX · até 20 MB</small></div><label class="button button-light" for="dialog-file-input">Selecionar</label><input id="dialog-file-input" type="file" accept=".csv,.xlsx" hidden></div>
-        <p class="dialog-file-name" id="dialog-file-name">Nenhum arquivo selecionado</p>
+        <label class="form-label" for="time-file-input">Matriz de tempo (CSV)</label>
+        <input class="file-input-visible" id="time-file-input" type="file" accept=".csv,text/csv" required aria-describedby="dialog-file-name">
+        <label class="form-label" for="distance-file-input">Matriz de distância (CSV)</label>
+        <input class="file-input-visible" id="distance-file-input" type="file" accept=".csv,text/csv" required aria-describedby="dialog-file-name">
+        <label class="confirm-order"><input id="confirm-node-order" type="checkbox" required><span>Confirmo que as linhas e colunas representam a mesma ordem de cidades nos dois arquivos.</span></label>
+        <p class="dialog-error" id="dialog-error" role="alert" hidden></p>
+        <p class="dialog-file-name" id="dialog-file-name" aria-live="polite">Limite de 10 MiB por arquivo CSV.</p>
         <div class="dialog-actions"><button class="button button-light" value="cancel">Cancelar</button><button class="button button-primary" id="create-instance" value="default">Criar instância <span aria-hidden="true">→</span></button></div>
       </form>
+    </dialog>
+
+    <dialog class="instance-dialog notification-dialog" id="notifications-dialog" aria-labelledby="notifications-title">
+      <div class="dialog-header"><div><p class="section-kicker">ATIVIDADE</p><h2 id="notifications-title">Notificações</h2></div><button class="icon-button dialog-close" id="close-notifications" type="button" aria-label="Fechar">×</button></div>
+      <div id="notifications-list" class="notifications-list" aria-live="polite"></div>
     </dialog>
   </body>
 </html>

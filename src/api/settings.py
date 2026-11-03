@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     max_upload_bytes: int = Field(default=10 * 1024 * 1024, gt=0)
     temporary_upload_ttl_seconds: int = Field(default=3600, gt=0)
     default_page_size: int = Field(default=50, gt=0)
-    maximum_page_size: int = Field(default=200, gt=0)
+    maximum_page_size: int = Field(default=200, gt=0, le=200)
     api_host: str = "0.0.0.0"
     api_port: int = Field(default=5000, ge=1, le=65535)
 

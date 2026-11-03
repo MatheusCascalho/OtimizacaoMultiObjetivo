@@ -4,7 +4,7 @@
 
 Especificar o fluxo ponta a ponta para criar uma instância de otimização a partir de arquivos, inspecionar os dados, configurar e acompanhar uma execução assíncrona e analisar seus resultados. O catálogo de tipos de problema determina quais entradas, algoritmos e visualizações estão disponíveis.
 
-Esta é uma especificação funcional. O scaffold da API e da infraestrutura local já existe, mas os fluxos de instâncias, uploads, execuções, resultados e notificações ainda não estão integrados ao mockup. O protótipo navegável fica em [`mockups/`](./mockups/).
+Esta especificação documenta o fluxo funcional local do TSP biobjetivo. A API Flask, worker Celery, persistência PostgreSQL, armazenamento S3 compatível e frontend vanilla estão integrados. A heurística v1 gera uma aproximação da fronteira por amostragem; a implantação permanece single-user e local, sem autenticação.
 
 ## Catálogo de tipos de problema
 
@@ -267,7 +267,7 @@ O cancelamento é solicitado por `POST /runs/{run_id}/cancel`; a API registra `c
 
 ## API do backend
 
-A API HTTP será implementada em Flask, com prefixo `/api/v1`. O processamento pesado (validação/análise de dados que possa bloquear, execução de algoritmos e solver) fica em serviços Python fora das rotas HTTP. As execuções serão enfileiradas com Celery usando Redis como broker; a API retorna sem aguardar o worker.
+A API HTTP Flask usa o prefixo `/api/v1`. A validação de uploads é síncrona; execução e análise de soluções ocorrem no worker Python fora do ciclo HTTP. As execuções são enfileiradas com Celery usando Redis como broker; a API retorna sem aguardar o worker.
 
 ### Catálogo de problemas
 
@@ -573,18 +573,18 @@ Mensagens de erro não devem conter stack traces nem ser convertidas em estados 
 
 O Compose inicia a infraestrutura de desenvolvimento descrita no [plano de implementação](./IMPLEMENTATION_PLAN.md). Copie `.env.example` para `.env` e substitua os valores de exemplo antes de executar `docker compose up --build`. Frontend e API são publicados somente em `127.0.0.1`; PostgreSQL, Redis e SILO ficam na rede interna do Compose. Os volumes de PostgreSQL e objetos são persistentes.
 
-O scaffold da API, worker e infraestrutura já está implementado. Nesta etapa a API expõe somente `/health/live` e `/health/ready`, o worker registra uma tarefa de ping para validar a integração Celery/Redis e a revisão Alembic inicial é um baseline vazio. Persistência de instâncias, uploads, execuções e notificações ainda será implementada nas próximas fases.
+O Compose executa a interface, API, worker, PostgreSQL, Redis e SILO, com migrações Alembic aplicadas pela inicialização da API. As listas usam paginação configurável; dados e arquivos persistem nos volumes locais.
 
 ## Mockup e limites
 
-Abra [`mockups/index.html`](./mockups/index.html) diretamente ou sirva a pasta `mockups/` com um servidor estático. O protótipo usa somente HTML, CSS e JavaScript vanilla.
+O frontend fica em [`mockups/`](./mockups/) e usa HTML, CSS e JavaScript vanilla. Com a API ativa, a interface integra seleção de instâncias, upload multipart das matrizes, análise de entrada por objetivo, execução/cancelamento assíncronos, resultados, notificações e exportação CSV.
 
-Os nomes, matrizes, grafo, estados do solver e resultados do protótipo são ilustrativos. A seleção de arquivos ocorre somente no navegador; não há leitura/upload real, validação de domínio, persistência, API, notificações em segundo plano ou solver. O botão de otimização simula conclusão/cancelamento localmente para demonstrar a interação.
+Quando a API estiver indisponível, a tela mostra dados de demonstração identificados visualmente; o fallback não simula sucesso de envio ou otimização. A única opção de algoritmo disponível é `random-heuristic`, com fronteira aproximada por amostragem.
 
-Na visualização do mockup, o controle começa em 20 vizinhos por cidade e ordena pelo tempo. Como o exemplo tem seis cidades, o limite efetivo é cinco vizinhos por cidade. A disposição fixa A–F é armazenada no estado JavaScript da instância e compartilhada pelo grafo de entrada e pelos grafos de rota. O CSV baixado contém os dados fictícios da solução demonstrativa selecionada.
+O grafo prévio começa com 20 vizinhos por cidade e limita o valor efetivo a `n - 1`; a matriz e o grafo usam dados da instância e layout persistido. O grafo de solução reutiliza essas mesmas coordenadas e o download CSV inclui o retorno à cidade inicial.
 
-## Pendências de implementação para a integração
+## Limitações restantes
 
-- Implementar limpeza dos uploads temporários após 1 hora e de objetos órfãos.
-- Implementar `DELETE /instances/{instance_id}` conforme contrato, com exclusão em cascata e limpeza de objetos recuperável/repetível.
+- Completar testes de interface automatizados e a validação visual/assistiva em navegadores e larguras móveis/desktop.
+- Confirmar persistência após reinicialização dos serviços no fluxo de aceite local.
 - Implementar autenticação/autorização antes de disponibilizar o serviço a várias pessoas ou a qualquer rede.

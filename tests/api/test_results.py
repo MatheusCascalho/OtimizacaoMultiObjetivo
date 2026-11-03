@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from api import create_app
 from api.settings import Settings
 from infrastructure.persistence.postgres.base import Base
-from infrastructure.persistence.postgres.models import Instance, Notification, Run, RunSolution
+from infrastructure.persistence.postgres.models import CityLayout, Instance, Notification, Run, RunSolution
 
 
 @pytest.fixture
@@ -68,6 +68,13 @@ def test_results_and_notifications_are_exposed_for_completed_run(app: Flask) -> 
                 created_at=datetime(2026, 11, 2, tzinfo=UTC),
             )
         )
+        session.add_all(
+            [
+                CityLayout(id="layout_1", instance_id="inst_results_1", city_index=0, x=10, y=20),
+                CityLayout(id="layout_2", instance_id="inst_results_1", city_index=1, x=30, y=40),
+                CityLayout(id="layout_3", instance_id="inst_results_1", city_index=2, x=50, y=60),
+            ]
+        )
         session.add(
             Notification(
                 notification_id="notif_1",
@@ -87,6 +94,8 @@ def test_results_and_notifications_are_exposed_for_completed_run(app: Flask) -> 
     assert results_response.json["run_id"] == "run_results_1"
     assert len(results_response.json["solutions"]) == 1
     assert results_response.json["solutions"][0]["dominance"] == "non_dominated"
+    assert results_response.json["total"] == 1
+    assert results_response.json["non_dominated"] == 1
 
     solution_response = client.get("/api/v1/runs/run_results_1/solutions/sol_1")
     assert solution_response.status_code == 200
@@ -95,6 +104,11 @@ def test_results_and_notifications_are_exposed_for_completed_run(app: Flask) -> 
     graph_response = client.get("/api/v1/runs/run_results_1/solutions/sol_1/graph")
     assert graph_response.status_code == 200
     assert len(graph_response.json["edges"]) == 3
+    assert graph_response.json["nodes"] == [
+        {"id": 1, "label": "1", "x": 10.0, "y": 20.0},
+        {"id": 2, "label": "2", "x": 30.0, "y": 40.0},
+        {"id": 3, "label": "3", "x": 50.0, "y": 60.0},
+    ]
 
     csv_response = client.get("/api/v1/runs/run_results_1/solutions/sol_1/route.csv")
     assert csv_response.status_code == 200
