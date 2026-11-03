@@ -90,6 +90,46 @@ function populateProblemTypes(problemTypes = state.problemTypes) {
   }));
 }
 
+function updateInstanceCount() {
+  document.querySelector('#instance-count').textContent = String(state.instances.length).padStart(2, '0');
+}
+
+function updateActiveNavigation() {
+  const activeHash = window.location.hash || '#instancias';
+  document.querySelectorAll('.sidebar .nav-item[href^="#"]').forEach((link) => {
+    const active = link.hash === activeHash;
+    link.classList.toggle('active', active);
+    if (active) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
+  });
+}
+
+function initializeLocalSettings() {
+  const iterationsInput = document.querySelector('#run-iterations');
+  try {
+    const savedIterations = Number(window.localStorage.getItem('paretolab.runIterations'));
+    if (Number.isInteger(savedIterations) && savedIterations >= 1 && savedIterations <= 100000) {
+      iterationsInput.value = String(savedIterations);
+    }
+  } catch {
+    iterationsInput.value = '50';
+  }
+  iterationsInput.addEventListener('change', () => {
+    const value = Number(iterationsInput.value);
+    if (!Number.isInteger(value) || value < 1 || value > 100000) {
+      iterationsInput.setCustomValidity('Informe um número inteiro entre 1 e 100.000.');
+      iterationsInput.reportValidity();
+      return;
+    }
+    iterationsInput.setCustomValidity('');
+    try {
+      window.localStorage.setItem('paretolab.runIterations', String(value));
+    } catch {
+      setApiStatus('A preferência vale apenas para esta sessão.', true);
+    }
+  });
+}
+
 function applyInstanceSummary(instance) {
   const instanceName = document.querySelector('#instance-name');
   if (!instanceName) return;
@@ -147,11 +187,13 @@ async function loadProblemTypes() {
     const payload = await fetchJson('/problem-types');
     state.problemTypes = payload.problem_types || [];
     populateProblemTypes();
+    document.querySelector('#api-connection-state').textContent = 'Conectada';
     return true;
   } catch (error) {
     console.warn('Fallback para catálogo demonstrativo:', error.message);
     state.problemTypes = fallbackProblemTypes;
     populateProblemTypes();
+    document.querySelector('#api-connection-state').textContent = 'Indisponível';
     return false;
   }
 }
@@ -160,6 +202,7 @@ async function loadInstances() {
   try {
     const payload = await fetchJson('/instances?limit=5');
     state.instances = payload.instances || [];
+    updateInstanceCount();
     populateInstances();
     if (state.instances.length) {
       state.selectedInstanceId = state.instances[0].instance_id;
@@ -184,12 +227,14 @@ async function loadInstances() {
     state.selectedInstanceId = null;
     state.resultIsDemo = false;
     state.solutions = [];
+    updateInstanceCount();
     document.querySelector('#input-preview').hidden = true;
     applyInstanceSummary(null);
     renderTable();
   } catch (error) {
     console.warn('Fallback para instância demonstrativa:', error.message);
     state.instances = [];
+    updateInstanceCount();
     state.instance = null;
     state.selectedInstanceId = null;
     state.resultIsDemo = true;
@@ -379,13 +424,21 @@ async function pollRun(runId) {
 
 async function startRun() {
   const button = document.querySelector('#start-run');
+  const iterationsInput = document.querySelector('#run-iterations');
+  const iterations = Number(iterationsInput.value);
+  if (!Number.isInteger(iterations) || iterations < 1 || iterations > 100000) {
+    iterationsInput.setCustomValidity('Informe um número inteiro entre 1 e 100.000.');
+    iterationsInput.reportValidity();
+    return;
+  }
+  iterationsInput.setCustomValidity('');
   button.disabled = true;
   setApiStatus('Enfileirando otimização...');
   try {
     const response = await fetchJson(`/instances/${state.selectedInstanceId}/runs`, {
       method: 'POST',
       headers: { 'Idempotency-Key': crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}` },
-      body: JSON.stringify({ parameters: { iterations: 50 } }),
+      body: JSON.stringify({ parameters: { iterations } }),
     });
     state.activeRun = response;
     state.solutions = [];
@@ -895,6 +948,19 @@ document.querySelector('#export-csv').addEventListener('click', () => {
 });
 
 const dialog = document.querySelector('#instance-dialog');
+document.querySelectorAll('.sidebar .nav-item[href^="#"]').forEach((link) => {
+  link.addEventListener('click', () => {
+    document.querySelectorAll('.sidebar .nav-item[href^="#"]').forEach((item) => {
+      const active = item === link;
+      item.classList.toggle('active', active);
+      if (active) item.setAttribute('aria-current', 'page');
+      else item.removeAttribute('aria-current');
+    });
+  });
+});
+window.addEventListener('hashchange', updateActiveNavigation);
+initializeLocalSettings();
+updateActiveNavigation();
 document.querySelector('#open-modal').addEventListener('click', () => dialog.showModal());
 document.querySelector('#open-modal-secondary').addEventListener('click', () => dialog.showModal());
 document.querySelector('#instance-form').addEventListener('submit', createInstance);
