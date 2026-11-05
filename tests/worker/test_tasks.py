@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
@@ -12,7 +13,33 @@ from infrastructure.persistence.postgres.models import (
     RunSolution,
     TemporaryUpload,
 )
+from monoobjective_algorithms.interfaces import SolveResult
+from monoobjective_algorithms.tsp.heuristics import TSPSolution
 from worker.tasks import execute_run_with_dependencies, purge_expired_uploads, reconcile_orphaned_objects
+
+
+class _RecordingNeuroLKH:
+    requests = []
+
+    def __init__(self, seed=None, **kwargs) -> None:
+        self.seed = seed
+
+    def solve(self, instance, request):
+        _RecordingNeuroLKH.requests.append(request)
+        route = (1, 2, 3, 1) if len(_RecordingNeuroLKH.requests) % 2 else (1, 3, 2, 1)
+        time_cost = sum(
+            instance.time_matrix[source - 1][target - 1]
+            for source, target in zip(route, route[1:])
+        )
+        distance_cost = sum(
+            instance.distance_matrix[source - 1][target - 1]
+            for source, target in zip(route, route[1:])
+        )
+        return SolveResult(
+            status="feasible",
+            solution=TSPSolution(route=route),
+            objective_values={"time": time_cost, "distance": distance_cost},
+        )
 
 
 class FakeObjectStorage:
@@ -142,7 +169,13 @@ def test_execute_run_persists_unique_solutions_and_completion_notification() -> 
         )
         session.commit()
 
-    assert execute_run_with_dependencies("run_worker_1", engine, object_storage) == "run_worker_1"
+    _RecordingNeuroLKH.requests = []
+    with patch("worker.tasks.NeuroLKH", _RecordingNeuroLKH):
+        assert execute_run_with_dependencies("run_worker_1", engine, object_storage) == "run_worker_1"
+    weights = [request.parameters["weight"] for request in _RecordingNeuroLKH.requests]
+    assert weights[0] == 0
+    assert weights[-1] == 1
+    assert len(weights) == 20
 
     with Session(engine) as session:
         run = session.get(Run, "run_worker_1")

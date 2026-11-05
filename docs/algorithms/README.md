@@ -23,6 +23,7 @@ src/
       __init__.py
       instance.py
       heuristics/
+        neuro_lkh.py
         random_heuristic.py
       exact/
   multiobjective_algorithms/

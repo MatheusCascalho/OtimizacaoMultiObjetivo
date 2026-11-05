@@ -21,7 +21,7 @@ from infrastructure.object_storage.s3.client import create_s3_client
 from infrastructure.object_storage.s3.storage import S3ObjectStorage
 from infrastructure.persistence.postgres.database import create_engine
 from monoobjective_algorithms.interfaces import SolveRequest
-from monoobjective_algorithms.tsp.heuristics import RandomHeuristic
+from monoobjective_algorithms.tsp.heuristics import NeuroLKH
 from multiobjective_algorithms.dominance import non_dominated_mask
 from optimization_problems.tsp import TSPInstance
 from workflow_instance.domain.matrices import parse_matrix_csv
@@ -143,6 +143,14 @@ def execute_run(run_id: str) -> str:
         engine.dispose()
 
 
+def _neuro_lkh_weight(run_parameters: dict, completed: int, total: int) -> float:
+    if "weight" in run_parameters:
+        return run_parameters["weight"]
+    if total <= 1:
+        return 0.5
+    return (completed - 1) / (total - 1)
+
+
 def execute_run_with_dependencies(run_id: str, engine, object_storage) -> str:
     with Session(engine) as session:
         run = session.get(Run, run_id)
@@ -185,7 +193,7 @@ def execute_run_with_dependencies(run_id: str, engine, object_storage) -> str:
         )
         instance_data = TSPInstance(time_matrix=time_matrix, distance_matrix=distance_matrix)
         seed = run_parameters.get("seed")
-        solver = RandomHeuristic(seed=seed)
+        solver = NeuroLKH(seed=seed)
         unique_solutions: dict[tuple[int, ...], dict] = {}
         progress_interval = max(1, ceil(total / 20))
 
@@ -201,7 +209,15 @@ def execute_run_with_dependencies(run_id: str, engine, object_storage) -> str:
                         session.commit()
                     return run_id
 
-            result = solver.solve(instance_data, SolveRequest(objective="time"))
+            parameters = {"weight": _neuro_lkh_weight(run_parameters, completed, total)}
+            if "seed" in run_parameters:
+                parameters["seed"] = run_parameters["seed"]
+            if "lkh_trials" in run_parameters:
+                parameters["lkh_trials"] = run_parameters["lkh_trials"]
+            result = solver.solve(
+                instance_data,
+                SolveRequest(objective="time", parameters=parameters),
+            )
             if result.status not in {"optimal", "feasible"} or result.solution is None:
                 raise RuntimeError("A heurística não retornou uma rota factível.")
             unique_solutions.setdefault(
