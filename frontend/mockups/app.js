@@ -44,6 +44,8 @@ const state = {
   tablePageSize: 6,
   resultIsDemo: true,
   notifications: [],
+  routeGraph: null,
+  routeGraphKey: null,
 };
 
 async function fetchJson(endpoint, options = {}) {
@@ -623,16 +625,69 @@ async function createInstance(event) {
 async function showSelectedRoute() {
   const solution = state.solutions.find((item) => item.id === state.selectedSolutionId);
   if (!solution?.solutionId || !state.activeRun?.run_id) return;
+  const requestKey = `${state.activeRun.run_id}:${solution.solutionId}`;
   try {
     const graph = await fetchJson(`/runs/${state.activeRun.run_id}/solutions/${solution.solutionId}/graph`);
+    if (currentRouteKey() !== requestKey) return;
+    state.routeGraph = graph;
+    state.routeGraphKey = requestKey;
     drawRouteGraph(graph);
+    document.querySelector('#expand-route').disabled = false;
+    if (document.querySelector('#route-dialog').open) drawExpandedRoute();
     setApiStatus(`Rota da solução ${solution.id}: ${graph.route.join(' → ')}`);
   } catch (error) {
     setApiStatus(`Não foi possível carregar a rota: ${error.message}`, true);
   }
 }
 
-function drawRouteGraph(graph, routeCanvas = document.querySelector('#route-chart')) {
+function currentRouteKey() {
+  const solution = state.solutions.find((item) => item.id === state.selectedSolutionId);
+  if (!solution?.solutionId || !state.activeRun?.run_id) return null;
+  return `${state.activeRun.run_id}:${solution.solutionId}`;
+}
+
+function clearRouteCanvas(routeCanvas = document.querySelector('#route-chart')) {
+  const context = routeCanvas.getContext('2d');
+  const bounds = routeCanvas.getBoundingClientRect();
+  const ratio = window.devicePixelRatio || 1;
+  const width = Math.max(bounds.width, 1);
+  const height = Math.max(bounds.height, 1);
+  routeCanvas.width = Math.max(1, Math.round(width * ratio));
+  routeCanvas.height = Math.max(1, Math.round(height * ratio));
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  context.clearRect(0, 0, width, height);
+  if (routeCanvas.id === 'route-chart') {
+    routeCanvas.setAttribute('aria-label', 'Gráfico da rota selecionada; selecione Ver rota para carregar os dados');
+  }
+}
+
+function syncRoutePreview() {
+  const expandButton = document.querySelector('#expand-route');
+  if (!expandButton) return;
+  const key = currentRouteKey();
+  if (state.routeGraph && key && key === state.routeGraphKey) {
+    expandButton.disabled = false;
+    return;
+  }
+  const hadGraph = Boolean(state.routeGraph || state.routeGraphKey);
+  state.routeGraph = null;
+  state.routeGraphKey = null;
+  expandButton.disabled = true;
+  if (hadGraph) clearRouteCanvas();
+  const routeDialog = document.querySelector('#route-dialog');
+  if (routeDialog?.open) routeDialog.close();
+}
+
+const routeView = { zoom: 1, panX: 0, panY: 0 };
+const ROUTE_ZOOM_MIN = 0.5;
+const ROUTE_ZOOM_MAX = 4;
+let routePan = null;
+
+function drawRouteGraph(graph, routeCanvas = document.querySelector('#route-chart'), view) {
+  const zoom = view?.zoom ?? 1;
+  const panX = view?.panX ?? 0;
+  const panY = view?.panY ?? 0;
+  const labelAll = Boolean(view?.labelAll);
   const context = routeCanvas.getContext('2d');
   const bounds = routeCanvas.getBoundingClientRect();
   const ratio = window.devicePixelRatio || 1;
@@ -648,7 +703,16 @@ function drawRouteGraph(graph, routeCanvas = document.querySelector('#route-char
     context.fillText('Layout da instância indisponível', 10, 20);
     return;
   }
-  const inset = 18;
+  if (zoom !== 1 || panX !== 0 || panY !== 0) {
+    context.setTransform(ratio * zoom, 0, 0, ratio * zoom, ratio * panX, ratio * panY);
+  }
+  const inset = labelAll ? 28 : 18;
+  let plotWidth = bounds.width - inset * 2;
+  let plotHeight = bounds.height - inset * 2;
+  if (labelAll) {
+    plotWidth = Math.max(1, plotWidth);
+    plotHeight = Math.max(1, plotHeight);
+  }
   const xValues = nodes.map((node) => node.x);
   const yValues = nodes.map((node) => node.y);
   const minX = Math.min(...xValues);
@@ -659,8 +723,8 @@ function drawRouteGraph(graph, routeCanvas = document.querySelector('#route-char
     const node = nodes.find((item) => item.id === nodeId);
     if (!node) return null;
     return {
-      x: inset + ((node.x - minX) / Math.max(1, maxX - minX)) * (bounds.width - inset * 2),
-      y: inset + ((node.y - minY) / Math.max(1, maxY - minY)) * (bounds.height - inset * 2),
+      x: inset + ((node.x - minX) / Math.max(1, maxX - minX)) * plotWidth,
+      y: inset + ((node.y - minY) / Math.max(1, maxY - minY)) * plotHeight,
     };
   };
 
@@ -672,25 +736,105 @@ function drawRouteGraph(graph, routeCanvas = document.querySelector('#route-char
     context.moveTo(source.x, source.y);
     context.lineTo(target.x, target.y);
     context.strokeStyle = '#6d9779';
-    context.lineWidth = 1.4;
+    context.lineWidth = labelAll ? 1.75 : 1.4;
     context.stroke();
   });
   nodes.forEach((node) => {
     const point = pointFor(node.id);
     if (!point) return;
     context.beginPath();
-    context.arc(point.x, point.y, 3.2, 0, Math.PI * 2);
+    context.arc(point.x, point.y, labelAll ? 4.2 : 3.2, 0, Math.PI * 2);
     context.fillStyle = node.id === graph.route?.[0] ? '#d96545' : '#28624d';
     context.fill();
-    if (nodes.length <= 40 || node.id === graph.route?.[0] || node.id % 25 === 0) {
+    if (labelAll || nodes.length <= 40 || node.id === graph.route?.[0] || node.id % 25 === 0) {
       context.fillStyle = '#182b25';
-      context.font = '8px "IBM Plex Mono", monospace';
-      context.fillText(String(node.id), point.x + 5, point.y - 4);
+      if (labelAll) {
+        context.save();
+        context.translate(point.x, point.y);
+        context.scale(1 / zoom, 1 / zoom);
+        context.font = '12px "IBM Plex Mono", monospace';
+        context.fillText(String(node.label ?? node.id), 6, -6);
+        context.restore();
+      } else {
+        context.font = '8px "IBM Plex Mono", monospace';
+        context.fillText(String(node.id), point.x + 5, point.y - 4);
+      }
     }
   });
   routeCanvas.setAttribute('aria-label', graph.route?.length
     ? `Rota pelas cidades ${graph.route.join(', ')}`
     : 'Grafo de entrada da instância com layout persistido');
+}
+
+function updateRouteZoomControls() {
+  const percent = `${Math.round(routeView.zoom * 100)}%`;
+  document.querySelector('#route-zoom-level').textContent = percent;
+  document.querySelector('#route-zoom-out').disabled = routeView.zoom <= ROUTE_ZOOM_MIN + 0.001;
+  document.querySelector('#route-zoom-in').disabled = routeView.zoom >= ROUTE_ZOOM_MAX - 0.001;
+}
+
+function drawExpandedRoute() {
+  const routeDialog = document.querySelector('#route-dialog');
+  if (!routeDialog?.open || !state.routeGraph) return;
+  const canvas = document.querySelector('#route-viewer-canvas');
+  const bounds = canvas.getBoundingClientRect();
+  if (bounds.width < 2 || bounds.height < 2) return;
+  drawRouteGraph(state.routeGraph, canvas, {
+    zoom: routeView.zoom,
+    panX: routeView.panX,
+    panY: routeView.panY,
+    labelAll: true,
+  });
+}
+
+function zoomRouteTo(nextZoom, originX, originY) {
+  const zoom = Math.min(ROUTE_ZOOM_MAX, Math.max(ROUTE_ZOOM_MIN, nextZoom));
+  if (Math.abs(zoom - routeView.zoom) < 0.0001) {
+    updateRouteZoomControls();
+    return;
+  }
+  const worldX = (originX - routeView.panX) / routeView.zoom;
+  const worldY = (originY - routeView.panY) / routeView.zoom;
+  routeView.zoom = zoom;
+  routeView.panX = originX - worldX * zoom;
+  routeView.panY = originY - worldY * zoom;
+  updateRouteZoomControls();
+  drawExpandedRoute();
+}
+
+function routeViewerCenter() {
+  const bounds = document.querySelector('#route-viewer-canvas').getBoundingClientRect();
+  return { x: bounds.width / 2, y: bounds.height / 2 };
+}
+
+function resetRouteZoom() {
+  routeView.zoom = 1;
+  routeView.panX = 0;
+  routeView.panY = 0;
+  updateRouteZoomControls();
+  drawExpandedRoute();
+}
+
+function openRouteViewer() {
+  if (!state.routeGraph || state.routeGraphKey !== currentRouteKey()) return;
+  routeView.zoom = 1;
+  routeView.panX = 0;
+  routeView.panY = 0;
+  const solution = state.solutions.find((item) => item.id === state.selectedSolutionId);
+  document.querySelector('#route-dialog-title').textContent = solution
+    ? `Grafo da rota · Solução ${solution.id}`
+    : 'Grafo da rota';
+  updateRouteZoomControls();
+  const routeDialog = document.querySelector('#route-dialog');
+  if (!routeDialog.open) routeDialog.showModal();
+  document.querySelector('#route-zoom-out').focus();
+  window.requestAnimationFrame(drawExpandedRoute);
+}
+
+function endRoutePan(event) {
+  if (!routePan || (event && routePan.id !== event.pointerId)) return;
+  routePan = null;
+  document.querySelector('#route-viewer-canvas').classList.remove('is-panning');
 }
 
 async function downloadSelectedRoute() {
@@ -766,6 +910,7 @@ function renderTable() {
   document.querySelector('#page-indicator').textContent = `${Math.floor(state.tableOffset / state.tablePageSize) + 1} / ${Math.max(1, Math.ceil(visibleSolutions.length / state.tablePageSize))}`;
   document.querySelector('#export-csv').disabled = !state.resultIsDemo && !state.solutions.length;
   drawChart();
+  syncRoutePreview();
 }
 
 function drawChart() {
@@ -967,7 +1112,51 @@ document.querySelector('#instance-form').addEventListener('submit', createInstan
 document.querySelector('#start-run').addEventListener('click', startRun);
 document.querySelector('#cancel-run').addEventListener('click', cancelRun);
 document.querySelector('#view-route').addEventListener('click', showSelectedRoute);
+document.querySelector('#expand-route').addEventListener('click', openRouteViewer);
 document.querySelector('#download-route').addEventListener('click', downloadSelectedRoute);
+document.querySelector('#close-route-dialog').addEventListener('click', () => {
+  document.querySelector('#route-dialog').close();
+});
+document.querySelector('#route-dialog').addEventListener('close', () => {
+  endRoutePan();
+  const expandButton = document.querySelector('#expand-route');
+  if (!expandButton.disabled) expandButton.focus();
+});
+document.querySelector('#route-zoom-out').addEventListener('click', () => {
+  const origin = routeViewerCenter();
+  zoomRouteTo(routeView.zoom / 1.25, origin.x, origin.y);
+});
+document.querySelector('#route-zoom-in').addEventListener('click', () => {
+  const origin = routeViewerCenter();
+  zoomRouteTo(routeView.zoom * 1.25, origin.x, origin.y);
+});
+document.querySelector('#route-zoom-reset').addEventListener('click', resetRouteZoom);
+document.querySelector('#route-viewer-stage').addEventListener('wheel', (event) => {
+  const routeDialog = document.querySelector('#route-dialog');
+  if (!routeDialog.open) return;
+  event.preventDefault();
+  let delta = event.deltaY;
+  if (event.deltaMode === 1) delta *= 16;
+  else if (event.deltaMode === 2) delta *= document.querySelector('#route-viewer-canvas').getBoundingClientRect().height;
+  if (!delta) return;
+  const bounds = document.querySelector('#route-viewer-canvas').getBoundingClientRect();
+  zoomRouteTo(routeView.zoom * Math.exp(-delta * 0.0018), event.clientX - bounds.left, event.clientY - bounds.top);
+}, { passive: false });
+document.querySelector('#route-viewer-canvas').addEventListener('pointerdown', (event) => {
+  if (event.button !== 0) return;
+  const canvas = event.currentTarget;
+  canvas.setPointerCapture(event.pointerId);
+  routePan = { id: event.pointerId, x: event.clientX, y: event.clientY, panX: routeView.panX, panY: routeView.panY };
+  canvas.classList.add('is-panning');
+});
+document.querySelector('#route-viewer-canvas').addEventListener('pointermove', (event) => {
+  if (!routePan || routePan.id !== event.pointerId) return;
+  routeView.panX = routePan.panX + (event.clientX - routePan.x);
+  routeView.panY = routePan.panY + (event.clientY - routePan.y);
+  drawExpandedRoute();
+});
+document.querySelector('#route-viewer-canvas').addEventListener('pointerup', endRoutePan);
+document.querySelector('#route-viewer-canvas').addEventListener('pointercancel', endRoutePan);
 document.querySelector('#notifications-button').addEventListener('click', async () => {
   await loadNotifications();
   document.querySelector('#notifications-dialog').showModal();
@@ -1044,4 +1233,8 @@ document.querySelector('#neighbors-per-city').addEventListener('change', (event)
 
 const resizeObserver = new ResizeObserver(drawChart);
 resizeObserver.observe(chart);
+const routeResizeObserver = new ResizeObserver(() => {
+  if (document.querySelector('#route-dialog').open) drawExpandedRoute();
+});
+routeResizeObserver.observe(document.querySelector('#route-viewer-stage'));
 initializeDashboard();

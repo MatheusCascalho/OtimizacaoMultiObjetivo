@@ -118,6 +118,7 @@
                 <div class="selected-chart"><canvas id="route-chart" role="img" aria-label="Gráfico da rota selecionada; selecione Ver rota para carregar os dados"></canvas></div>
                 <div class="detail-metrics"><div class="detail-metric"><span><i class="legend-dot coral-dot"></i>Distância</span><strong id="selected-cost">-- km</strong></div><div class="detail-metric"><span><i class="legend-dot blue-dot"></i>Tempo</span><strong id="selected-coverage">-- h</strong></div><div class="detail-metric"><span>Cidades na rota</span><strong id="selected-items">--</strong></div></div>
                 <button class="button button-primary compare-button" id="view-route" type="button" disabled><span aria-hidden="true">⌖</span> Ver rota</button>
+                <button class="button button-light compare-button" id="expand-route" type="button" disabled aria-haspopup="dialog" aria-controls="route-dialog">Expandir grafo</button>
                 <button class="button button-light compare-button route-download" id="download-route" type="button" disabled><span aria-hidden="true">↓</span> Baixar rota CSV</button>
                 <p class="compare-feedback" id="compare-feedback" aria-live="polite"></p>
               </section>
@@ -174,6 +175,26 @@
     <dialog class="instance-dialog notification-dialog" id="notifications-dialog" aria-labelledby="notifications-title">
       <div class="dialog-header"><div><p class="section-kicker">ATIVIDADE</p><h2 id="notifications-title">Notificações</h2></div><button class="icon-button dialog-close" id="close-notifications" type="button" aria-label="Fechar">×</button></div>
       <div id="notifications-list" class="notifications-list" aria-live="polite"></div>
+    </dialog>
+
+    <dialog class="instance-dialog route-graph-dialog" id="route-dialog" aria-labelledby="route-dialog-title" aria-describedby="route-viewer-hint">
+      <div class="dialog-header">
+        <div>
+          <p class="section-kicker">ROTA DA SOLUÇÃO</p>
+          <h2 id="route-dialog-title">Grafo da rota</h2>
+        </div>
+        <button class="icon-button dialog-close" id="close-route-dialog" type="button" aria-label="Fechar">×</button>
+      </div>
+      <div class="route-viewer-toolbar" role="toolbar" aria-label="Zoom do grafo">
+        <button class="button button-light" id="route-zoom-out" type="button">Diminuir zoom</button>
+        <span class="route-zoom-readout" aria-live="polite"><span class="sr-only">Zoom atual: </span><span id="route-zoom-level">100%</span></span>
+        <button class="button button-light" id="route-zoom-in" type="button">Aumentar zoom</button>
+        <button class="button button-light" id="route-zoom-reset" type="button">Tamanho original</button>
+      </div>
+      <div class="route-viewer-stage" id="route-viewer-stage">
+        <canvas id="route-viewer-canvas" role="img" aria-label="Grafo ampliado da rota selecionada"></canvas>
+      </div>
+      <p class="route-viewer-hint" id="route-viewer-hint">Roda do mouse amplia o ponto sob o cursor. Arraste para deslocar o grafo. Zoom de 50% a 400%.</p>
     </dialog>
   </body>
 </html>

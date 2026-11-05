@@ -228,6 +228,7 @@ h2 { margin: 0; font: 600 16px/1.3 var(--display); letter-spacing: 0; }
 .detail-metric span { display: inline-flex; align-items: center; gap: 6px; }
 .detail-metric strong { color: #34463a; font: 500 11px var(--mono); }
 .compare-button { width: 100%; min-height: 34px; font-size: 10px; }
+.selected-panel .compare-button + .compare-button { margin-top: 6px; }
 .compare-button span { color: #dbe8da; font-size: 15px; }
 .compare-feedback { min-height: 13px; margin: 5px 0 0; color: var(--green); text-align: center; font-size: 9px; }
 .compare-feedback.error { color: #a64c32; }
@@ -289,6 +290,20 @@ h2 { margin: 0; font: 600 16px/1.3 var(--display); letter-spacing: 0; }
 .notification-open strong { color: var(--ink); font-size: 11px; }
 .notification-open span { color: #69756c; font-size: 10px; line-height: 1.45; }
 .notification-open small, .notification-empty { margin: 0; color: #899189; font: 9px var(--mono); }
+
+.route-graph-dialog[open] { display: flex; flex-direction: column; width: min(1120px, calc(100vw - 24px)); max-width: calc(100% - 16px); min-width: 0; height: min(860px, calc(100dvh - 24px)); max-height: calc(100dvh - 24px); margin: auto; padding: 16px 16px 12px; overflow: hidden; border-radius: 5px; }
+.route-graph-dialog .dialog-header { flex: 0 0 auto; align-items: flex-start; gap: 8px; margin-bottom: 12px; }
+.route-graph-dialog .dialog-header > div { min-width: 0; }
+.route-graph-dialog .dialog-header h2 { font-size: 18px; line-height: 1.2; overflow-wrap: anywhere; }
+.route-graph-dialog .dialog-close { flex: 0 0 auto; }
+.route-viewer-toolbar { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.route-viewer-toolbar .button { flex: 0 1 auto; max-width: 100%; min-height: 32px; padding: 6px 10px; font-size: 11px; line-height: 1.2; white-space: normal; text-align: center; }
+.route-zoom-readout { position: relative; display: inline-flex; min-width: 4.6rem; min-height: 32px; align-items: center; justify-content: center; padding: 0 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); color: var(--ink); font: 500 12px var(--mono); }
+.route-viewer-stage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; border: 1px solid #e9ebe3; background: #f8f8f3; touch-action: none; }
+#route-viewer-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; user-select: none; }
+#route-viewer-canvas.is-panning { cursor: grabbing; }
+.route-viewer-hint { flex: 0 0 auto; margin: 8px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+@media (max-width: 620px) { .route-graph-dialog[open] { width: min(1120px, calc(100vw - 16px)); max-width: calc(100% - 12px); height: calc(100dvh - 16px); padding: 12px; }.route-graph-dialog .dialog-header h2 { font-size: 16px; }.route-viewer-toolbar .button { flex: 1 1 calc(50% - 8px); }.route-zoom-readout { flex: 1 1 100%; order: -1; justify-content: flex-start; } }
 
 @media (min-width: 1600px) { .page-wrap { padding-right: 54px; padding-left: 54px; }.chart-stage { height: 285px; } }
 @media (max-width: 1180px) { .sidebar { width: 210px; }.main-content { margin-left: 210px; }.topbar { padding-right: 28px; padding-left: 28px; }.page-wrap { padding-right: 28px; padding-left: 28px; }.analysis-layout { grid-template-columns: minmax(0, 1fr) 245px; gap: 11px; }.metric-strip { grid-template-columns: 1fr 1.2fr 1fr .7fr; }.metric { padding-right: 10px; padding-left: 10px; }.metric-note { font-size: 8px; }.chart-panel { padding-right: 13px; padding-left: 13px; } }
