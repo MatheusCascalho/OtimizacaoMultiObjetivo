@@ -8,3 +8,6 @@ gunicorn>=23,<24
 psycopg[binary]>=3.2,<4
 pydantic-settings>=2.7,<3
 SQLAlchemy>=2.0,<3
+pandas 
+numpy
+matplotlib
