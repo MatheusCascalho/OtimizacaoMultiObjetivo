@@ -10,6 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
     <script src="frontier_series.js" defer></script>
+    <script src="solution_timing.js" defer></script>
     <script src="app.js" defer></script>
   </head>
   <body>
@@ -77,6 +78,13 @@
             <div class="metric"><span class="metric-label">OBJETIVOS</span><div class="metric-value objective-values"><span class="objective-dot coral-dot"></span>Distância <span class="metric-amp">×</span><span class="objective-dot blue-dot"></span>Tempo</div></div>
             <div class="metric"><span class="metric-label">PROGRESSO</span><div class="metric-value" id="metric-progress">-- <span class="metric-note">sem execução</span></div></div>
             <div class="metric metric-end"><span class="metric-label">FRONTEIRA</span><div class="metric-value" id="metric-frontier">-- <span class="metric-note">não dominadas</span></div></div>
+          </section>
+
+          <section class="timing-strip" id="solution-timing" aria-label="Tempos para encontrar solução">
+            <div class="metric"><span class="metric-label" id="timing-mean-label">Tempo médio para encontrar solução</span><div class="metric-value" id="timing-mean" aria-labelledby="timing-mean-label">--</div></div>
+            <div class="metric"><span class="metric-label" id="timing-stdev-label">Desvio padrão do tempo para encontrar solução</span><div class="metric-value" id="timing-stdev" aria-labelledby="timing-stdev-label">--</div></div>
+            <div class="metric"><span class="metric-label" id="timing-slowest-label">Solução mais demorada</span><div class="metric-value" id="timing-slowest" aria-labelledby="timing-slowest-label">--</div></div>
+            <div class="metric metric-end"><span class="metric-label" id="timing-fastest-label">Solução mais rápida</span><div class="metric-value" id="timing-fastest" aria-labelledby="timing-fastest-label">--</div></div>
           </section>
 
           <section class="input-preview panel" id="input-preview" aria-labelledby="input-preview-title" hidden>

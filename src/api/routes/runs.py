@@ -15,6 +15,7 @@ from workflow_instance.domain.frontier_sampling import (
     FRONTIER_REPETITIONS,
     total_attempts,
 )
+from workflow_instance.domain.solution_timing import solution_timing_kpis
 
 
 runs_blueprint = Blueprint("runs", __name__, url_prefix="/api/v1")
@@ -296,6 +297,7 @@ def get_run_results(run_id: str):
             "repetitions": (run.parameters or {}).get("repetitions", FRONTIER_REPETITIONS),
             "solutions": [_serialize_solution(row) for row in rows],
             "frontiers": _frontier_groups(frontier_rows),
+            "solution_timing": solution_timing_kpis(run.solution_timings),
             "limit": limit,
             "offset": offset,
             "total": total,

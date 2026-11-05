@@ -182,6 +182,11 @@ def test_results_expose_one_frontier_per_sampling_round(app: Flask) -> None:
                 status="completed",
                 parameters={"iterations": 50, "repetitions": 5, "seed": 3},
                 progress={"completed": 250, "total": 250, "percent": 100},
+                solution_timings=[
+                    {"round": 1, "attempt": 2, "duration_ms": 30},
+                    {"round": 1, "attempt": 1, "duration_ms": 10},
+                    {"round": 2, "attempt": 1, "duration_ms": 20},
+                ],
                 created_at=datetime(2026, 11, 5, tzinfo=UTC),
                 updated_at=datetime(2026, 11, 5, tzinfo=UTC),
             )
@@ -217,6 +222,14 @@ def test_results_expose_one_frontier_per_sampling_round(app: Flask) -> None:
 
     assert response.status_code == 200
     assert response.json["repetitions"] == 5
+    assert response.json["solution_timing"] == {
+        "unit": "ms",
+        "count": 3,
+        "mean_ms": 20,
+        "sample_stdev_ms": 10,
+        "fastest": {"round": 1, "attempt": 1, "duration_ms": 10},
+        "slowest": {"round": 1, "attempt": 2, "duration_ms": 30},
+    }
     frontiers = response.json["frontiers"]
     assert [frontier["round"] for frontier in frontiers] == [1, 2, 3, 4, 5]
     assert all(len(frontier["solutions"]) == 1 for frontier in frontiers)

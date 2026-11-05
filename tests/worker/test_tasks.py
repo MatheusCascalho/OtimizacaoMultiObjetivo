@@ -285,6 +285,14 @@ def test_execute_run_samples_five_rounds_of_fifty_attempts() -> None:
     engine.dispose()
     assert run is not None
     assert run.progress == {"completed": 250, "total": 250, "percent": 100}
+    timings = run.solution_timings or []
+    assert len(timings) == 250
+    attempts_by_round: dict[int, list[int]] = {}
+    for sample in timings:
+        assert sample["duration_ms"] >= 0
+        attempts_by_round.setdefault(sample["round"], []).append(sample["attempt"])
+    assert set(attempts_by_round) == {1, 2, 3, 4, 5}
+    assert all(attempts == list(range(1, 51)) for attempts in attempts_by_round.values())
     assert {solution.round_index for solution in solutions} == {1, 2, 3, 4, 5}
 
 

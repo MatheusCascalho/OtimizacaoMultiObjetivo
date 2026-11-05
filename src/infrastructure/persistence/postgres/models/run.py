@@ -17,6 +17,7 @@ class Run(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
     parameters: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     progress: Mapped[dict] = mapped_column(JSON, nullable=False, default=lambda: {"completed": 0, "total": 0, "percent": 0})
+    solution_timings: Mapped[list | None] = mapped_column(JSON, nullable=True)
     idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     error_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

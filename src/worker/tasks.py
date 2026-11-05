@@ -1,6 +1,7 @@
 import logging
 from datetime import UTC, datetime, timedelta
 from math import ceil
+from time import perf_counter
 from uuid import uuid4
 
 from botocore.exceptions import BotoCoreError, ClientError
@@ -211,6 +212,7 @@ def execute_run_with_dependencies(run_id: str, engine, object_storage) -> str:
         solver = NeuroLKH(seed=base_seed)
         progress_interval = max(1, ceil(total / 20))
         sampled_rounds: list[list[dict]] = []
+        attempt_timings: list[dict] = []
 
         for round_index in range(1, repetitions + 1):
             unique_solutions: dict[tuple[int, ...], dict] = {}
@@ -233,12 +235,17 @@ def execute_run_with_dependencies(run_id: str, engine, object_storage) -> str:
                     parameters["seed"] = attempt_seed
                 if "lkh_trials" in run_parameters:
                     parameters["lkh_trials"] = run_parameters["lkh_trials"]
+                started = perf_counter()
                 result = solver.solve(
                     instance_data,
                     SolveRequest(objective="time", parameters=parameters),
                 )
+                duration_ms = (perf_counter() - started) * 1000
                 if result.status not in {"optimal", "feasible"} or result.solution is None:
                     raise RuntimeError("A heurística não retornou uma rota factível.")
+                attempt_timings.append(
+                    {"round": round_index, "attempt": attempt, "duration_ms": duration_ms}
+                )
                 unique_solutions.setdefault(
                     tuple(result.solution.route),
                     {
@@ -307,6 +314,7 @@ def execute_run_with_dependencies(run_id: str, engine, object_storage) -> str:
                 )
             current_run.status = "completed"
             current_run.progress = {"completed": total, "total": total, "percent": 100}
+            current_run.solution_timings = attempt_timings
             current_run.finished_at = now
             current_run.updated_at = now
             _set_instance_status(session, instance_id, "completed", now)

@@ -222,6 +222,7 @@ async function loadInstances() {
         state.resultIsDemo = false;
         state.solutions = [];
         state.frontiers = [];
+        renderSolutionTiming(null);
         renderTable();
       }
       return true;
@@ -232,6 +233,7 @@ async function loadInstances() {
     state.resultIsDemo = false;
     state.solutions = [];
     state.frontiers = [];
+    renderSolutionTiming(null);
     updateInstanceCount();
     document.querySelector('#input-preview').hidden = true;
     applyInstanceSummary(null);
@@ -245,6 +247,7 @@ async function loadInstances() {
     state.resultIsDemo = true;
     state.solutions = [...mockSolutions];
     state.frontiers = [];
+    renderSolutionTiming(null);
     document.querySelector('#input-preview').hidden = true;
     populateInstances();
     applyInstanceSummary(null);
@@ -376,6 +379,30 @@ function findDisplayedSolution(id) {
   return null;
 }
 
+function setTimingValue(selector, value, note) {
+  const node = document.querySelector(selector);
+  if (!node) return;
+  node.replaceChildren(document.createTextNode(value));
+  if (note) {
+    node.append(Object.assign(document.createElement('span'), { className: 'metric-note', textContent: note }));
+  }
+}
+
+function renderSolutionTiming(timing) {
+  const view = window.SolutionTiming.solutionTimingView(timing);
+  if (!view) {
+    setTimingValue('#timing-mean', '--');
+    setTimingValue('#timing-stdev', '--');
+    setTimingValue('#timing-slowest', '--');
+    setTimingValue('#timing-fastest', '--');
+    return;
+  }
+  setTimingValue('#timing-mean', view.mean);
+  setTimingValue('#timing-stdev', view.stdev);
+  setTimingValue('#timing-slowest', view.slowest, view.slowestDetail);
+  setTimingValue('#timing-fastest', view.fastest, view.fastestDetail);
+}
+
 function chartFrontierSolutions() {
   if (state.frontiers.length) {
     return state.frontiers.flatMap((frontier) => frontier.points);
@@ -404,6 +431,7 @@ async function loadRunResults(runId, offset) {
     document.createTextNode(String(payload.non_dominated || 0)),
     Object.assign(document.createElement('span'), { className: 'metric-note', textContent: 'não dominadas' }),
   );
+  renderSolutionTiming(payload.solution_timing);
   if (state.solutions.length) selectSolution(selectedId);
   else renderTable();
 }
@@ -432,6 +460,7 @@ async function pollRun(runId) {
           state.solutions = [];
           state.frontiers = [];
           state.resultIsDemo = false;
+          renderSolutionTiming(null);
           renderTable();
           if (run.status === 'failed') setApiStatus(run.error || 'A execução falhou.', true);
         }
@@ -480,6 +509,7 @@ async function startRun() {
     state.resultTotal = 0;
     document.querySelector('#metric-solutions').replaceChildren(document.createTextNode('--'));
     document.querySelector('#metric-frontier').replaceChildren(document.createTextNode('--'));
+    renderSolutionTiming(null);
     renderTable();
     applyInstanceSummary(state.instance);
     setApiStatus('Otimização enfileirada. O progresso será atualizado automaticamente.');
@@ -639,6 +669,7 @@ async function createInstance(event) {
     state.solutions = [];
     state.frontiers = [];
     state.resultIsDemo = false;
+    renderSolutionTiming(null);
     state.resultOffset = 0;
     applyInstanceSummary(instance);
     await loadInputAnalysis('time');
@@ -1282,6 +1313,7 @@ document.querySelector('#instance-selector').addEventListener('change', async (e
       state.solutions = [];
       state.frontiers = [];
       state.resultIsDemo = false;
+      renderSolutionTiming(null);
       renderTable();
       if (['queued', 'running', 'cancel_requested'].includes(state.activeRun?.status)) pollRun(state.activeRun.run_id);
     }
