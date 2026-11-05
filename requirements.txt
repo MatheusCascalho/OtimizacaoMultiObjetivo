@@ -1,6 +1,2 @@
 pyomo>=6.8,<7
 matplotlib>=3.9,<4
-numpy>=1.26,<3
-torch>=2.0,<3
-# The bundled LKH engine is restricted to academic and non-commercial use.
-elkai>=2.0.1,<3
