@@ -2,6 +2,60 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Attach: API",
+            "type": "debugpy",
+            "request": "attach",
+            "preLaunchTask": "compose-dev: up",
+            "connect": {
+                "host": "127.0.0.1",
+                "port": 5678
+            },
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}/src",
+                    "remoteRoot": "/app/src"
+                },
+                {
+                    "localRoot": "${workspaceFolder}",
+                    "remoteRoot": "/app"
+                }
+            ],
+            "justMyCode": false,
+            "redirectOutput": true
+        },
+        {
+            "name": "Attach: Worker",
+            "type": "debugpy",
+            "request": "attach",
+            "preLaunchTask": "compose-dev: up",
+            "connect": {
+                "host": "127.0.0.1",
+                "port": 5679
+            },
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}/src",
+                    "remoteRoot": "/app/src"
+                },
+                {
+                    "localRoot": "${workspaceFolder}",
+                    "remoteRoot": "/app"
+                }
+            ],
+            "subProcess": true,
+            "justMyCode": false,
+            "redirectOutput": true
+        },
+        {
+            "name": "Attach: ParetoLab",
+            "type": "chrome",
+            "request": "launch",
+            "preLaunchTask": "compose-dev: up",
+            "url": "http://127.0.0.1:8080",
+            "webRoot": "${workspaceFolder}/frontend/mockups",
+            "breakOnLoad": false
+        },
+        {
             "name": "Debug: teste MDS (arquivo fixo)",
             "type": "debugpy",
             "request": "launch",
@@ -20,6 +74,17 @@
             "console": "integratedTerminal",
             "cwd": "${fileDirname}",
             "justMyCode": true
+        }
+    ],
+    "compounds": [
+        {
+            "name": "Attach: API + ParetoLab + Worker",
+            "configurations": [
+                "Attach: API",
+                "Attach: ParetoLab",
+                "Attach: Worker"
+            ],
+            "stopAll": true
         }
     ]
 }

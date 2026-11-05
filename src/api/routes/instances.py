@@ -19,6 +19,8 @@ from infrastructure.persistence.postgres.models import (
     TemporaryUpload,
 )
 from workflow_instance.domain.matrices import parse_matrix_csv
+from workflow_instance.domain.layout import mds_layout
+import numpy as np
 
 
 instances_blueprint = Blueprint("instances", __name__, url_prefix="/api/v1")
@@ -53,17 +55,50 @@ def _objective_payload(problem_type: dict, objective_id: str) -> dict | None:
     return None
 
 
-def _build_city_layout(node_count: int) -> list[dict[str, float | int]]:
-    if node_count <= 0:
-        return []
+LAYOUT_MATRIX_ROLES = ("distance_matrix", "time_matrix")
+
+
+def _build_circle_layout(node_count: int) -> list[dict[str, float | int]]:
+    """Layout de contingência (comportamento anterior)."""
     points: list[dict[str, float | int]] = []
     for city_index in range(node_count):
         angle = (2 * math.pi * city_index) / node_count
-        radius = 100.0
-        x = round(100.0 + radius * math.cos(angle), 4)
-        y = round(100.0 + radius * math.sin(angle), 4)
+        x = round(100.0 + 100.0 * math.cos(angle), 4)
+        y = round(100.0 + 100.0 * math.sin(angle), 4)
         points.append({"city_index": city_index, "x": x, "y": y})
     return points
+
+
+def _build_city_layout(node_count: int, matrix=None) -> list[dict[str, float | int]]:
+    if node_count <= 0:
+        return []
+    if matrix is not None and len(matrix) == node_count:
+        try:
+            coords = mds_layout(matrix, size=200.0)
+        except (ValueError, np.linalg.LinAlgError):
+            current_app.logger.warning("MDS falhou; usando layout circular.", exc_info=True)
+        else:
+            return [
+                {"city_index": i, "x": round(float(x), 4), "y": round(float(y), 4)}
+                for i, (x, y) in enumerate(coords)
+            ]
+    return _build_circle_layout(node_count)
+
+
+def _load_layout_matrix(instance_id: str, session: Session):
+    """Carrega a matriz usada no layout, com a MESMA sessão (enxerga dados não commitados)."""
+    storage = current_app.extensions["paretolab_object_storage"]
+    for role in LAYOUT_MATRIX_ROLES:
+        file_row = session.scalar(
+            select(InstanceFile).where(InstanceFile.instance_id == instance_id, InstanceFile.role == role)
+        )
+        if file_row is None:
+            continue
+        try:
+            return parse_matrix_csv(storage.get(file_row.object_key), file_row.object_key)
+        except Exception:
+            current_app.logger.warning("Falha ao ler %s para layout.", role, exc_info=True)
+    return None
 
 
 def _ensure_city_layout(instance_id: str, node_count: int, session: Session) -> list[dict[str, float | int]]:
@@ -73,11 +108,10 @@ def _ensure_city_layout(instance_id: str, node_count: int, session: Session) -> 
     if len(existing) == node_count:
         return [{"city_index": row.city_index, "x": row.x, "y": row.y} for row in existing]
 
-    to_delete = session.scalars(select(CityLayout).where(CityLayout.instance_id == instance_id)).all()
-    for row in to_delete:
+    for row in existing:
         session.delete(row)
 
-    layout_points = _build_city_layout(node_count)
+    layout_points = _build_city_layout(node_count, _load_layout_matrix(instance_id, session))
     for point in layout_points:
         session.add(
             CityLayout(
@@ -90,7 +124,6 @@ def _ensure_city_layout(instance_id: str, node_count: int, session: Session) -> 
         )
     session.commit()
     return layout_points
-
 
 def _get_instance_matrix(instance_id: str, role: str) -> tuple[tuple[float, ...], ...]:
     engine = current_app.extensions["paretolab_database_engine"]

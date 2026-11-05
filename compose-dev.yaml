@@ -1,0 +1,67 @@
+# Overlay de debug. A API e o worker escutam o debugpy; o ParetoLab serve o
+# frontend local para o debugger do browser acoplar na página.
+#
+#   docker compose -f compose.yaml -f compose-dev.yaml up -d
+#
+# DEBUGPY_WAIT_FOR_CLIENT=1 segura API e worker até o attach. Nesse modo o
+# healthcheck não passa, então suba o compose manualmente e só então anexe
+# o debugger. O padrão 0 sobe a stack e aceita o attach com ela no ar.
+
+services:
+  api:
+    command:
+      - sh
+      - -c
+      - |
+        python -c "import debugpy" >/dev/null 2>&1 || pip install --disable-pip-version-check --no-cache-dir "debugpy>=1.8,<2"
+        alembic upgrade head
+        set -- python -m debugpy --listen 0.0.0.0:5678
+        if [ "$${DEBUGPY_WAIT_FOR_CLIENT:-0}" = "1" ]; then
+          set -- "$$@" --wait-for-client
+        fi
+        exec "$$@" -m flask --app api:create_app run --host 0.0.0.0 --port 5000 --no-debugger --no-reload
+    environment:
+      DEBUGPY_WAIT_FOR_CLIENT: ${DEBUGPY_WAIT_FOR_CLIENT:-0}
+    ports:
+      - "127.0.0.1:${PARETOLAB_API_DEBUG_PORT:-5678}:5678"
+    volumes:
+      - ./src:/app/src
+      - ./migrations:/app/migrations
+      - ./alembic.ini:/app/alembic.ini:ro
+    healthcheck:
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+  worker:
+    command:
+      - sh
+      - -c
+      - |
+        python -c "import debugpy" >/dev/null 2>&1 || pip install --disable-pip-version-check --no-cache-dir "debugpy>=1.8,<2"
+        set -- python -m debugpy --listen 0.0.0.0:5679
+        if [ "$${DEBUGPY_WAIT_FOR_CLIENT:-0}" = "1" ]; then
+          set -- "$$@" --wait-for-client
+        fi
+        exec "$$@" -m worker.run
+    environment:
+      CELERY_WORKER_POOL: solo
+      CELERY_WORKER_CONCURRENCY: "1"
+      DEBUGPY_WAIT_FOR_CLIENT: ${DEBUGPY_WAIT_FOR_CLIENT:-0}
+    ports:
+      - "127.0.0.1:${PARETOLAB_WORKER_DEBUG_PORT:-5679}:5679"
+    volumes:
+      - ./src:/app/src
+    healthcheck:
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+  paretolab:
+    volumes:
+      - ./frontend/mockups/index.html:/usr/share/nginx/html/index.html:ro
+      - ./frontend/mockups/styles.css:/usr/share/nginx/html/styles.css:ro
+      - ./frontend/mockups/app.js:/usr/share/nginx/html/app.js:ro
+      - ./frontend/mockups/nginx.dev.conf:/etc/nginx/conf.d/default.conf:ro
