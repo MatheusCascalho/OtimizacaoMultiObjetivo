@@ -6,7 +6,9 @@ Euclidean distances. This patch keeps that coordinate path for feature
 generation and, on the solve call, replaces the cost matrix with the integer
 matrix packed at the tail of the parameter vector. It also copies the best
 tour back into that vector, because the published wrapper only writes trial
-costs. Graphs with fewer than 20 nodes repeat their nearest neighbor so
+costs. Candidate edges store C(), the explicit cost without node penalties;
+D() adds Pi and makes the Lin-Kernighan gain fail its Precision assertion.
+Graphs with fewer than 20 nodes repeat their nearest neighbor so
 ``featureGenerate`` can still fill the fixed 20-slot tensor the network expects.
 """
 
@@ -132,7 +134,7 @@ def main() -> None:
         "\t        continue;\n"
         "\t    To = &NodeSet[Id];\n"
         "\t    Alpha = j * 100;\n"
-        "\t    int tmp = ParetoLabExplicitCosts ? D(From, To) :\n"
+        "\t    int tmp = ParetoLabExplicitCosts ? C(From, To) :\n"
         "\t        SavedD[From->Id * n_nodes - n_nodes + To->Id - 1];\n"
         "\t    AddCandidate(From, To, tmp, Alpha);\n",
         "explicit candidate cost",

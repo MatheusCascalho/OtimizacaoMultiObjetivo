@@ -133,7 +133,11 @@ def _c_seed(seed: int) -> int:
 
 
 def solve(payload: dict) -> dict:
-    from neurolkh_costs import coordinates_from_symmetric_costs, scale_symmetric_costs
+    from neurolkh_costs import (
+        coordinates_from_symmetric_costs,
+        restore_jonker_volgenant_tour,
+        scale_symmetric_costs,
+    )
 
     matrix = np.asarray(payload["cost_matrix"], dtype=float)
     trials = int(payload["trials"])
@@ -152,7 +156,8 @@ def solve(payload: dict) -> dict:
         network, coordinates, edge_index, edge_feat, inverse_edge_index
     )
     tour = _solve_lkh(coordinates, candidates, penalties, integer_costs, trials, c_seed)
-    return {"ok": True, "tour": tour}
+    tour = restore_jonker_volgenant_tour(tour, matrix)
+    return {"ok": True, "tour": list(tour)}
 
 
 def main() -> None:

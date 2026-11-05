@@ -1,10 +1,16 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 import numpy as np
 
 from monoobjective_algorithms.interfaces import SolveRequest
 from monoobjective_algorithms.tsp.heuristics import NeuroLKH
-from monoobjective_algorithms.tsp.heuristics.neurolkh_costs import scale_symmetric_costs
+from monoobjective_algorithms.tsp.heuristics.neuro_lkh import neurolkh_checkout
+from monoobjective_algorithms.tsp.heuristics.neurolkh_costs import (
+    restore_jonker_volgenant_tour,
+    scale_symmetric_costs,
+)
 from optimization_problems.tsp import (
     JonkerVolgenantSymmetrization,
     TSPInstance,
@@ -182,6 +188,39 @@ class NeuroLKHTests(unittest.TestCase):
             )
         with self.assertRaisesRegex(ValueError, "lkh_trials must"):
             NeuroLKH(lkh_trials=True, backend=self.backend)
+
+    def test_checkout_is_found_by_walking_up_from_the_module(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / "third_party" / "NeuroLKH" / "SRC_swig").mkdir(parents=True)
+            module = directory / "src/pkg/heuristics/neuro_lkh.py"
+            module.parent.mkdir(parents=True)
+            module.write_text("pass", encoding="utf-8")
+
+            found = neurolkh_checkout(module)
+
+        self.assertEqual(found, (directory / "third_party" / "NeuroLKH").resolve())
+
+    def test_forbidden_edges_are_removed_before_decoding(self) -> None:
+        matrix = np.asarray(self._expected_matrix(0.5), dtype=float)
+        valid = [1, 5, 2, 6, 3, 4]
+        # Reverse the segment between the first two real edges so both become
+        # same-partition edges. One 2-opt must restore a decodable cycle.
+        broken = [1, 2, 5, 6, 3, 4]
+        restored = restore_jonker_volgenant_tour(broken, matrix)
+
+        self.assertEqual(set(restored), set(valid))
+        self.assertEqual(len(restored), len(valid))
+        symmetrized = JonkerVolgenantSymmetrization.transform(
+            TSPInstance(
+                time_matrix=WeightedCostScalarization.scalarize(self.instance, 0.5).cost_matrix,
+                distance_matrix=WeightedCostScalarization.scalarize(self.instance, 0.5).cost_matrix,
+            )
+        )
+        route = symmetrized.original_route(restored)
+        self.assertEqual(route[0], route[-1])
+        self.assertEqual(set(route[:-1]), {1, 2, 3})
+        self.assertEqual(restore_jonker_volgenant_tour(valid, matrix), tuple(valid))
 
     def test_backend_failure_does_not_fabricate_a_tour(self) -> None:
         failed = NeuroLKH(backend=FakeBackend(error="extension missing"))

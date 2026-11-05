@@ -77,7 +77,7 @@ Para gerenciar o NeuroLKH de forma modular, adicione-o como um **Git Submodule**
 No terminal da raiz do seu projeto:
 
 ```bash
-git submodule add https://github.com/liangxinedu/NeuroLKH.git third_party/NeuroLKH
+git submodule add https://github.com/MatheusCascalho/NeuroLKH.git third_party/NeuroLKH
 git submodule update --init --recursive
 ```
 

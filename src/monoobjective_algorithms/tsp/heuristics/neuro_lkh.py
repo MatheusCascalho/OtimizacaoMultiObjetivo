@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import tempfile
 from math import isfinite
@@ -23,12 +24,33 @@ _TSP_OBJECTIVES = frozenset({"time", "distance"})
 _PARAMETERS = frozenset({"weight", "seed", "lkh_trials"})
 
 
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[4]
+def neurolkh_checkout(start: Path | None = None) -> Path:
+    """Directory of the NeuroLKH checkout used by the worker.
+
+    ``NEUROLKH_ROOT`` wins when the caller does not pass ``start``. Otherwise
+    the search walks from this module toward the filesystem root and returns
+    the first ``third_party/NeuroLKH`` directory. The worker image copies that
+    checkout to ``/app/third_party/NeuroLKH``.
+    """
+
+    if start is None:
+        override = os.environ.get("NEUROLKH_ROOT")
+        if override:
+            return Path(override)
+        start = Path(__file__)
+    origin = start.resolve()
+    search_from = origin.parents if origin.is_file() else (origin, *origin.parents)
+    for candidate in search_from:
+        checkout = candidate / "third_party" / "NeuroLKH"
+        if (checkout / "SRC_swig").is_dir():
+            return checkout
+    if len(origin.parents) > 4:
+        return origin.parents[4] / "third_party" / "NeuroLKH"
+    return origin / "third_party" / "NeuroLKH"
 
 
 def _default_model_path() -> Path:
-    return _repo_root() / "third_party" / "NeuroLKH" / "pretrained" / "neurolkh.pt"
+    return neurolkh_checkout() / "pretrained" / "neurolkh.pt"
 
 
 def _validate_weight(weight: object) -> float:
@@ -73,9 +95,12 @@ class SubprocessNeuroLKHBackend:
         trials: int,
         seed: int | None,
     ) -> tuple[int, ...]:
-        root = _repo_root() / "third_party" / "NeuroLKH"
+        root = neurolkh_checkout()
         if not root.is_dir():
-            raise RuntimeError(f"NeuroLKH checkout not found: {root}")
+            raise RuntimeError(
+                f"NeuroLKH checkout not found: {root}. "
+                "The worker image must include third_party/NeuroLKH."
+            )
         interpreter = root / ".venv" / "bin" / "python"
         if not interpreter.is_file():
             interpreter = Path("python3.11")

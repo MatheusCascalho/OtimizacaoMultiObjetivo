@@ -8,7 +8,7 @@ network. The integer matrix is what LKH optimizes.
 
 from __future__ import annotations
 
-from typing import Mapping
+from typing import Mapping, Sequence
 
 import numpy as np
 
@@ -107,6 +107,94 @@ def coordinates_from_symmetric_costs(matrix: np.ndarray) -> np.ndarray:
         if coords[pivot, axis] < 0:
             coords[:, axis] *= -1.0
     return _unit_square(coords)
+
+
+def restore_jonker_volgenant_tour(
+    tour: Sequence[int],
+    cost_matrix: np.ndarray,
+) -> tuple[int, ...]:
+    """Remove same-partition edges so the cycle decodes to one asymmetric tour.
+
+    NeuroLKH only exchanges candidate edges. On a Jonker-Volgenant matrix that
+    set can leave a few forbidden edges even after every coupling edge is used.
+    Each accepted 2-opt reconnects one such edge to the opposite partition and
+    lowers the explicit symmetric cost. The returned cycle visits every
+    symmetrized node once.
+    """
+
+    costs = np.asarray(cost_matrix, dtype=float)
+    size = int(costs.shape[0])
+    if costs.shape != (size, size) or size < 2 or size % 2 != 0:
+        raise ValueError("cost matrix must be square with an even node count")
+    route = [int(node) for node in tour]
+    if len(route) == size + 1:
+        if route[0] != route[-1]:
+            raise ValueError("symmetric tour must be a Hamiltonian cycle")
+        route = route[:-1]
+    if len(route) != size or set(route) != set(range(1, size + 1)):
+        raise ValueError("symmetric tour must be a Hamiltonian cycle")
+
+    half = size // 2
+
+    def _same_partition(left: int, right: int) -> bool:
+        return (left <= half) == (right <= half)
+
+    def _forbidden_count(nodes: Sequence[int]) -> int:
+        return sum(
+            _same_partition(nodes[index], nodes[(index + 1) % size])
+            for index in range(size)
+        )
+
+    def _two_opt(nodes: list[int], left: int, right: int) -> list[int]:
+        segment: list[int] = []
+        cursor = (left + 1) % size
+        stop = (right + 1) % size
+        while cursor != stop:
+            segment.append(nodes[cursor])
+            cursor = (cursor + 1) % size
+        segment.reverse()
+        rebuilt = [nodes[left], *segment]
+        cursor = stop
+        while cursor != left:
+            rebuilt.append(nodes[cursor])
+            cursor = (cursor + 1) % size
+        return rebuilt
+
+    for _ in range(size):
+        if _forbidden_count(route) == 0:
+            return tuple(route)
+        best: tuple[tuple[int, float], int, int] | None = None
+        for left in range(size):
+            start = route[left]
+            end = route[(left + 1) % size]
+            if not _same_partition(start, end):
+                continue
+            for right in range(size):
+                if len({left, (left + 1) % size, right, (right + 1) % size}) < 4:
+                    continue
+                other_start = route[right]
+                other_end = route[(right + 1) % size]
+                new_forbidden = int(_same_partition(start, other_start)) + int(
+                    _same_partition(end, other_end)
+                )
+                old_forbidden = 1 + int(_same_partition(other_start, other_end))
+                if new_forbidden >= old_forbidden:
+                    continue
+                delta = (
+                    costs[start - 1, other_start - 1]
+                    + costs[end - 1, other_end - 1]
+                    - costs[start - 1, end - 1]
+                    - costs[other_start - 1, other_end - 1]
+                )
+                key = (new_forbidden, float(delta))
+                if best is None or key < best[0]:
+                    best = (key, left, right)
+        if best is None:
+            break
+        _, left, right = best
+        route = _two_opt(route, left, right)
+
+    raise ValueError("symmetric tour does not encode one asymmetric tour")
 
 
 def _unit_square(coords: np.ndarray) -> np.ndarray:
