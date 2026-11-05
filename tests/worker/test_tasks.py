@@ -173,9 +173,14 @@ def test_execute_run_persists_unique_solutions_and_completion_notification() -> 
     with patch("worker.tasks.NeuroLKH", _RecordingNeuroLKH):
         assert execute_run_with_dependencies("run_worker_1", engine, object_storage) == "run_worker_1"
     weights = [request.parameters["weight"] for request in _RecordingNeuroLKH.requests]
-    assert weights[0] == 0
+    assert len(weights) == 100
+    assert weights[:20][0] == 0
+    assert weights[19] == 1
+    assert weights[20] == 0
     assert weights[-1] == 1
-    assert len(weights) == 20
+    seeds = [request.parameters["seed"] for request in _RecordingNeuroLKH.requests]
+    assert len(set(seeds)) == 5
+    assert seeds[:20] == [7] * 20
 
     with Session(engine) as session:
         run = session.get(Run, "run_worker_1")
@@ -189,12 +194,98 @@ def test_execute_run_persists_unique_solutions_and_completion_notification() -> 
     engine.dispose()
     assert run is not None
     assert run.status == "completed"
-    assert run.progress == {"completed": 20, "total": 20, "percent": 100}
-    assert 1 <= len(solutions) <= 2
+    assert run.progress == {"completed": 100, "total": 100, "percent": 100}
+    assert {solution.round_index for solution in solutions} == {1, 2, 3, 4, 5}
+    assert all(
+        sum(solution.round_index == round_index for solution in solutions) == 2
+        for round_index in range(1, 6)
+    )
     assert all(solution.route[0] == solution.route[-1] == 1 for solution in solutions)
     assert {solution.dominance for solution in solutions} <= {"non_dominated", "dominated"}
     assert len(notifications) == 1
     assert notifications[0].instance_id == "inst_worker_1"
+    assert "5 rodadas" in notifications[0].message
+
+
+def test_execute_run_samples_five_rounds_of_fifty_attempts() -> None:
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    object_storage = FakeObjectStorage(
+        {
+            "instances/time.csv": b"0,1,8\n7,0,3\n4,6,0\n",
+            "instances/distance.csv": b"0,5,9\n8,0,2\n3,7,0\n",
+        }
+    )
+    with Session(engine) as session:
+        session.add(
+            Instance(
+                instance_id="inst_rounds",
+                problem_type_id="tsp-time-distance",
+                catalog_version="1.0.0",
+                name="TSP de rodadas",
+                status="ready",
+                configuration={"algorithm_id": "random-heuristic"},
+                node_count=3,
+            )
+        )
+        session.add_all(
+            [
+                InstanceFile(
+                    id="if_rounds_time",
+                    instance_id="inst_rounds",
+                    upload_id="upl_rounds_time",
+                    role="time_matrix",
+                    object_key="instances/time.csv",
+                    sha256="c" * 64,
+                    size_bytes=20,
+                ),
+                InstanceFile(
+                    id="if_rounds_distance",
+                    instance_id="inst_rounds",
+                    upload_id="upl_rounds_distance",
+                    role="distance_matrix",
+                    object_key="instances/distance.csv",
+                    sha256="d" * 64,
+                    size_bytes=20,
+                ),
+            ]
+        )
+        session.add(
+            Run(
+                run_id="run_rounds",
+                instance_id="inst_rounds",
+                algorithm_id="random-heuristic",
+                status="queued",
+                parameters={"iterations": 50, "seed": 11},
+                progress={"completed": 0, "total": 50, "percent": 0},
+                idempotency_key="rounds-test",
+            )
+        )
+        session.commit()
+
+    _RecordingNeuroLKH.requests = []
+    with patch("worker.tasks.NeuroLKH", _RecordingNeuroLKH):
+        execute_run_with_dependencies("run_rounds", engine, object_storage)
+
+    requests = _RecordingNeuroLKH.requests
+    assert len(requests) == 250
+    rounds: dict[int, list[float]] = {}
+    for request in requests:
+        seed = request.parameters["seed"]
+        rounds.setdefault(seed, []).append(request.parameters["weight"])
+    assert len(rounds) == 5
+    assert [len(weights) for weights in rounds.values()] == [50, 50, 50, 50, 50]
+    for weights in rounds.values():
+        assert weights[0] == 0
+        assert weights[-1] == 1
+
+    with Session(engine) as session:
+        solutions = session.scalars(select(RunSolution).where(RunSolution.run_id == "run_rounds")).all()
+        run = session.get(Run, "run_rounds")
+    engine.dispose()
+    assert run is not None
+    assert run.progress == {"completed": 250, "total": 250, "percent": 100}
+    assert {solution.round_index for solution in solutions} == {1, 2, 3, 4, 5}
 
 
 def test_reconcile_deletes_only_old_unreferenced_objects() -> None:

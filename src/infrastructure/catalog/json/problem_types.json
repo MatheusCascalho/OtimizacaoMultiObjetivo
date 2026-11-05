@@ -42,7 +42,7 @@
         {
           "id": "random-heuristic",
           "name": "RandomHeuristic",
-          "description": "Gera rotas aleatórias para aproximar as soluções não dominadas por amostragem.",
+          "description": "Aproxima a fronteira por amostragem. Cada execução repete o mapeamento 5 vezes; iterations é o número de amostragens de cada rodada.",
           "parameters": [
             {"id": "iterations", "type": "integer", "default": 50, "minimum": 1, "maximum": 100000},
             {"id": "seed", "type": "integer", "required": false}

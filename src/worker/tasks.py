@@ -24,6 +24,12 @@ from monoobjective_algorithms.interfaces import SolveRequest
 from monoobjective_algorithms.tsp.heuristics import NeuroLKH
 from multiobjective_algorithms.dominance import non_dominated_mask
 from optimization_problems.tsp import TSPInstance
+from workflow_instance.domain.frontier_sampling import (
+    DEFAULT_ITERATIONS,
+    FRONTIER_REPETITIONS,
+    round_seed,
+    total_attempts,
+)
 from workflow_instance.domain.matrices import parse_matrix_csv
 
 
@@ -143,6 +149,12 @@ def execute_run(run_id: str) -> str:
         engine.dispose()
 
 
+def _positive_int(value: object, default: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        return default
+    return value
+
+
 def _neuro_lkh_weight(run_parameters: dict, completed: int, total: int) -> float:
     if "weight" in run_parameters:
         return run_parameters["weight"]
@@ -170,7 +182,9 @@ def execute_run_with_dependencies(run_id: str, engine, object_storage) -> str:
         ).all()
         run_parameters = dict(run.parameters or {})
         instance_id = run.instance_id
-        total = int((run.progress or {}).get("total", 0) or run_parameters.get("iterations", 50))
+        iterations = _positive_int(run_parameters.get("iterations"), DEFAULT_ITERATIONS)
+        repetitions = _positive_int(run_parameters.get("repetitions"), FRONTIER_REPETITIONS)
+        total = total_attempts(iterations, repetitions)
         if instance is None or len(files) != 2:
             run.status = "failed"
             run.error_message = "Os dados de entrada da instância não estão disponíveis."
@@ -193,42 +207,16 @@ def execute_run_with_dependencies(run_id: str, engine, object_storage) -> str:
         )
         instance_data = TSPInstance(time_matrix=time_matrix, distance_matrix=distance_matrix)
         seed = run_parameters.get("seed")
-        solver = NeuroLKH(seed=seed)
-        unique_solutions: dict[tuple[int, ...], dict] = {}
+        base_seed = seed if isinstance(seed, int) and not isinstance(seed, bool) else None
+        solver = NeuroLKH(seed=base_seed)
         progress_interval = max(1, ceil(total / 20))
+        sampled_rounds: list[list[dict]] = []
 
-        for completed in range(1, total + 1):
-            with Session(engine) as session:
-                current_run = session.get(Run, run_id)
-                if current_run is None or current_run.status == "cancel_requested":
-                    if current_run is not None:
-                        current_run.status = "cancelled"
-                        current_run.finished_at = datetime.now(UTC)
-                        current_run.updated_at = current_run.finished_at
-                        _set_instance_status(session, instance_id, "cancelled", current_run.updated_at)
-                        session.commit()
-                    return run_id
-
-            parameters = {"weight": _neuro_lkh_weight(run_parameters, completed, total)}
-            if "seed" in run_parameters:
-                parameters["seed"] = run_parameters["seed"]
-            if "lkh_trials" in run_parameters:
-                parameters["lkh_trials"] = run_parameters["lkh_trials"]
-            result = solver.solve(
-                instance_data,
-                SolveRequest(objective="time", parameters=parameters),
-            )
-            if result.status not in {"optimal", "feasible"} or result.solution is None:
-                raise RuntimeError("A heurística não retornou uma rota factível.")
-            unique_solutions.setdefault(
-                tuple(result.solution.route),
-                {
-                    "route": list(result.solution.route),
-                    "objective_values": dict(result.objective_values),
-                },
-            )
-
-            if completed % progress_interval == 0 or completed == total:
+        for round_index in range(1, repetitions + 1):
+            unique_solutions: dict[tuple[int, ...], dict] = {}
+            attempt_seed = round_seed(base_seed, round_index) if base_seed is not None else None
+            for attempt in range(1, iterations + 1):
+                completed = (round_index - 1) * iterations + attempt
                 with Session(engine) as session:
                     current_run = session.get(Run, run_id)
                     if current_run is None or current_run.status == "cancel_requested":
@@ -239,22 +227,59 @@ def execute_run_with_dependencies(run_id: str, engine, object_storage) -> str:
                             _set_instance_status(session, instance_id, "cancelled", current_run.updated_at)
                             session.commit()
                         return run_id
-                    current_run.progress = {
-                        "completed": completed,
-                        "total": total,
-                        "percent": 100 if completed == total else int((completed / total) * 100),
-                    }
-                    current_run.updated_at = datetime.now(UTC)
-                    session.commit()
 
-        solutions = list(unique_solutions.values())
-        mask = non_dominated_mask(
-            [
-                [solution["objective_values"]["time"], solution["objective_values"]["distance"]]
-                for solution in solutions
-            ],
-            ("minimize", "minimize"),
-        )
+                parameters = {"weight": _neuro_lkh_weight(run_parameters, attempt, iterations)}
+                if attempt_seed is not None:
+                    parameters["seed"] = attempt_seed
+                if "lkh_trials" in run_parameters:
+                    parameters["lkh_trials"] = run_parameters["lkh_trials"]
+                result = solver.solve(
+                    instance_data,
+                    SolveRequest(objective="time", parameters=parameters),
+                )
+                if result.status not in {"optimal", "feasible"} or result.solution is None:
+                    raise RuntimeError("A heurística não retornou uma rota factível.")
+                unique_solutions.setdefault(
+                    tuple(result.solution.route),
+                    {
+                        "route": list(result.solution.route),
+                        "objective_values": dict(result.objective_values),
+                    },
+                )
+
+                if completed % progress_interval == 0 or completed == total:
+                    with Session(engine) as session:
+                        current_run = session.get(Run, run_id)
+                        if current_run is None or current_run.status == "cancel_requested":
+                            if current_run is not None:
+                                current_run.status = "cancelled"
+                                current_run.finished_at = datetime.now(UTC)
+                                current_run.updated_at = current_run.finished_at
+                                _set_instance_status(session, instance_id, "cancelled", current_run.updated_at)
+                                session.commit()
+                            return run_id
+                        current_run.progress = {
+                            "completed": completed,
+                            "total": total,
+                            "percent": 100 if completed == total else int((completed / total) * 100),
+                        }
+                        current_run.updated_at = datetime.now(UTC)
+                        session.commit()
+
+            round_solutions = list(unique_solutions.values())
+            mask = non_dominated_mask(
+                [
+                    [solution["objective_values"]["time"], solution["objective_values"]["distance"]]
+                    for solution in round_solutions
+                ],
+                ("minimize", "minimize"),
+            )
+            for solution, is_non_dominated in zip(round_solutions, mask):
+                solution["dominance"] = "non_dominated" if is_non_dominated else "dominated"
+                solution["round_index"] = round_index
+            sampled_rounds.append(round_solutions)
+
+        solutions = [solution for round_solutions in sampled_rounds for solution in round_solutions]
         now = datetime.now(UTC)
         with Session(engine) as session:
             current_run = session.get(Run, run_id)
@@ -267,7 +292,7 @@ def execute_run_with_dependencies(run_id: str, engine, object_storage) -> str:
                     session.commit()
                 return run_id
 
-            for solution, is_non_dominated in zip(solutions, mask):
+            for solution in solutions:
                 session.add(
                     RunSolution(
                         solution_id=f"sol_{uuid4().hex}",
@@ -275,7 +300,8 @@ def execute_run_with_dependencies(run_id: str, engine, object_storage) -> str:
                         instance_id=instance_id,
                         objective_values=solution["objective_values"],
                         route=solution["route"],
-                        dominance="non_dominated" if is_non_dominated else "dominated",
+                        dominance=solution["dominance"],
+                        round_index=solution["round_index"],
                         created_at=now,
                     )
                 )
@@ -290,7 +316,9 @@ def execute_run_with_dependencies(run_id: str, engine, object_storage) -> str:
                     instance_id=instance_id,
                     run_id=run_id,
                     title="Execução concluída",
-                    message=f"A execução gerou {len(solutions)} soluções únicas.",
+                    message=(
+                        f"A execução gerou {len(solutions)} soluções únicas em {repetitions} rodadas."
+                    ),
                     is_read=False,
                     created_at=now,
                 )

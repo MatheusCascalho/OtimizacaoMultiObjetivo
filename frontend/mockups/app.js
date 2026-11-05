@@ -31,6 +31,7 @@ const mockSolutions = [
 
 const state = {
   solutions: [...mockSolutions],
+  frontiers: [],
   problemTypes: [],
   instances: [],
   instance: null,
@@ -220,6 +221,7 @@ async function loadInstances() {
       } else {
         state.resultIsDemo = false;
         state.solutions = [];
+        state.frontiers = [];
         renderTable();
       }
       return true;
@@ -229,6 +231,7 @@ async function loadInstances() {
     state.selectedInstanceId = null;
     state.resultIsDemo = false;
     state.solutions = [];
+    state.frontiers = [];
     updateInstanceCount();
     document.querySelector('#input-preview').hidden = true;
     applyInstanceSummary(null);
@@ -241,6 +244,7 @@ async function loadInstances() {
     state.selectedInstanceId = null;
     state.resultIsDemo = true;
     state.solutions = [...mockSolutions];
+    state.frontiers = [];
     document.querySelector('#input-preview').hidden = true;
     populateInstances();
     applyInstanceSummary(null);
@@ -350,19 +354,45 @@ function renderMatrix(matrix) {
 
 let pollingRunId = null;
 
-async function loadRunResults(runId, offset) {
-  const payload = await fetchJson(`/runs/${runId}/results?limit=${state.resultLimit}&offset=${offset}`);
-  state.resultOffset = offset;
-  state.tableOffset = 0;
-  state.resultTotal = payload.total || 0;
-  state.resultIsDemo = false;
-  state.solutions = (payload.solutions || []).map((solution) => ({
+function mapApiSolution(solution, round = solution.round) {
+  return {
     id: solution.solution_id,
     solutionId: solution.solution_id,
     cost: Number(solution.objective_values.distance),
     coverage: Number(solution.objective_values.time),
     frontier: solution.dominance === 'non_dominated',
     route: solution.route,
+    round: Number.isInteger(round) ? round : null,
+  };
+}
+
+function findDisplayedSolution(id) {
+  const fromPage = state.solutions.find((item) => item.id === id);
+  if (fromPage) return fromPage;
+  for (const frontier of state.frontiers) {
+    const point = frontier.points.find((item) => item.id === id);
+    if (point) return point;
+  }
+  return null;
+}
+
+function chartFrontierSolutions() {
+  if (state.frontiers.length) {
+    return state.frontiers.flatMap((frontier) => frontier.points);
+  }
+  return state.solutions;
+}
+
+async function loadRunResults(runId, offset) {
+  const payload = await fetchJson(`/runs/${runId}/results?limit=${state.resultLimit}&offset=${offset}`);
+  state.resultOffset = offset;
+  state.tableOffset = 0;
+  state.resultTotal = payload.total || 0;
+  state.resultIsDemo = false;
+  state.solutions = (payload.solutions || []).map((solution) => mapApiSolution(solution));
+  state.frontiers = (payload.frontiers || []).map((frontier) => ({
+    round: frontier.round,
+    points: (frontier.solutions || []).map((solution) => mapApiSolution(solution, frontier.round)),
   }));
   selectedId = state.solutions[0]?.id || null;
   state.selectedSolutionId = selectedId;
@@ -400,6 +430,7 @@ async function pollRun(runId) {
           setApiStatus('Execução concluída. Resultados disponíveis.');
         } else {
           state.solutions = [];
+          state.frontiers = [];
           state.resultIsDemo = false;
           renderTable();
           if (run.status === 'failed') setApiStatus(run.error || 'A execução falhou.', true);
@@ -444,6 +475,7 @@ async function startRun() {
     });
     state.activeRun = response;
     state.solutions = [];
+    state.frontiers = [];
     state.resultIsDemo = false;
     state.resultTotal = 0;
     document.querySelector('#metric-solutions').replaceChildren(document.createTextNode('--'));
@@ -605,6 +637,7 @@ async function createInstance(event) {
     populateInstances();
     state.activeRun = null;
     state.solutions = [];
+    state.frontiers = [];
     state.resultIsDemo = false;
     state.resultOffset = 0;
     applyInstanceSummary(instance);
@@ -884,7 +917,7 @@ function renderTable() {
       <td><span class="table-id">SOL-${solution.id}</span></td>
       <td><span class="table-number">${solution.cost.toFixed(2)} km</span></td>
       <td><span class="table-number">${solution.coverage.toFixed(2)} h</span></td>
-      <td><span class="status-pill ${solution.frontier ? 'frontier' : 'dominated'}">${solution.frontier ? 'Não dominada' : 'Dominada'}</span></td>
+      <td><span class="status-pill ${solution.frontier ? 'frontier' : 'dominated'}">${solution.frontier ? 'Não dominada' : 'Dominada'}</span>${solution.round ? `<span class="round-label">Rodada ${solution.round}</span>` : ''}</td>
       <td class="row-arrow" aria-hidden="true">↗</td>
     </tr>`).join('');
 
@@ -925,8 +958,15 @@ function drawChart() {
   const inset = { left: 39, right: 13, top: 14, bottom: 25 };
   const plotWidth = width - inset.left - inset.right;
   const plotHeight = height - inset.top - inset.bottom;
-  const costs = state.solutions.map((solution) => solution.cost);
-  const coverages = state.solutions.map((solution) => solution.coverage);
+  const scalePoints = [];
+  const seenScaleIds = new Set();
+  chartFrontierSolutions().concat(state.solutions).forEach((solution) => {
+    if (seenScaleIds.has(solution.id)) return;
+    seenScaleIds.add(solution.id);
+    scalePoints.push(solution);
+  });
+  const costs = scalePoints.map((solution) => solution.cost);
+  const coverages = scalePoints.map((solution) => solution.coverage);
   const minCost = costs.length ? Math.min(...costs) : 0;
   const maxCost = costs.length ? Math.max(...costs) : 1;
   const minCoverage = coverages.length ? Math.min(...coverages) : 0;
@@ -969,46 +1009,77 @@ function drawChart() {
     chartContext.fillText(value.toFixed(1), position, height - 11);
   }
 
-  const frontier = state.solutions.filter((solution) => solution.frontier).sort((a, b) => a.cost - b.cost);
-  chartContext.beginPath();
-  frontier.forEach((solution, index) => {
-    if (index === 0) chartContext.moveTo(normalizedX(solution.cost), normalizedY(solution.coverage));
-    else chartContext.lineTo(normalizedX(solution.cost), normalizedY(solution.coverage));
+  const series = ParetoFrontierSeries.frontierSeriesFromSolutions(chartFrontierSolutions());
+  const multiRound = series.some((item) => item.round != null);
+  ParetoFrontierSeries.strokeFrontierSeries(chartContext, series, (solution) => ({
+    x: normalizedX(solution.cost),
+    y: normalizedY(solution.coverage),
+  }));
+  renderRoundLegend(series);
+  const colorById = new Map();
+  series.forEach((item) => {
+    item.points.forEach((point) => colorById.set(point.id, item.color));
   });
-  chartContext.strokeStyle = '#6d9779';
-  chartContext.lineWidth = 1.5;
-  chartContext.setLineDash([4, 4]);
-  chartContext.stroke();
-  chartContext.setLineDash([]);
 
   plottedPoints = [];
-  const pointsToDraw = activeView === 'all' ? state.solutions : frontier;
+  const frontierPoints = series.flatMap((item) => item.points);
+  const pointsToDraw = activeView === 'all'
+    ? frontierPoints.concat(state.solutions.filter((solution) => !solution.frontier && !frontierPoints.some((point) => point.id === solution.id)))
+    : frontierPoints;
   pointsToDraw.forEach((solution) => {
     const px = normalizedX(solution.cost);
     const py = normalizedY(solution.coverage);
     const isSelected = solution.id === selectedId;
     const isFrontier = solution.frontier;
+    const seriesColor = colorById.get(solution.id);
     plottedPoints.push({ solution, x: px, y: py });
 
     chartContext.beginPath();
     chartContext.arc(px, py, isSelected ? 6 : isFrontier ? 4.5 : 3.5, 0, Math.PI * 2);
-    chartContext.fillStyle = isSelected ? '#d96545' : isFrontier ? '#28624d' : '#fffefa';
+    if (!multiRound) {
+      chartContext.fillStyle = isSelected ? '#d96545' : isFrontier ? '#28624d' : '#fffefa';
+    } else if (isFrontier && seriesColor) {
+      chartContext.fillStyle = seriesColor;
+    } else {
+      chartContext.fillStyle = '#fffefa';
+    }
     chartContext.fill();
-    chartContext.strokeStyle = isSelected ? '#fffefa' : isFrontier ? '#fffefa' : '#a9b5aa';
+    chartContext.strokeStyle = isFrontier || isSelected ? '#fffefa' : '#a9b5aa';
     chartContext.lineWidth = isSelected ? 2 : 1.2;
     chartContext.stroke();
     if (isSelected) {
       chartContext.beginPath();
       chartContext.arc(px, py, 10, 0, Math.PI * 2);
-      chartContext.strokeStyle = 'rgb(217 101 69 / 27%)';
+      chartContext.strokeStyle = multiRound ? 'rgb(24 43 37 / 28%)' : 'rgb(217 101 69 / 27%)';
       chartContext.lineWidth = 4;
       chartContext.stroke();
     }
   });
 }
 
+function renderRoundLegend(series) {
+  const legend = document.querySelector('#frontier-round-legend');
+  const singleKey = document.querySelector('#single-frontier-key');
+  if (!legend || !singleKey) return;
+  const multiRound = series.some((item) => item.round != null);
+  singleKey.hidden = multiRound;
+  legend.hidden = !multiRound;
+  legend.replaceChildren();
+  if (!multiRound) return;
+  series.forEach((item) => {
+    const entry = document.createElement('span');
+    const swatch = document.createElement('i');
+    swatch.className = 'round-swatch';
+    swatch.style.color = item.color;
+    swatch.style.borderTopStyle = item.dash.length ? 'dashed' : 'solid';
+    swatch.setAttribute('aria-hidden', 'true');
+    entry.append(swatch, document.createTextNode(item.label));
+    legend.append(entry);
+  });
+}
+
 function selectSolution(id) {
-  const solution = state.solutions.find((item) => item.id === id);
+  const solution = findDisplayedSolution(id);
   if (!solution) return;
   selectedId = id;
   state.selectedSolutionId = id;
@@ -1063,7 +1134,8 @@ chart.addEventListener('pointermove', (event) => {
   }
 
   const { solution } = nearest.point;
-  tooltip.innerHTML = `<strong>SOL-${solution.id}</strong><span>Distância: ${solution.cost.toFixed(2)} km</span><span>Tempo: ${solution.coverage.toFixed(2)} h</span>`;
+  const roundLine = solution.round ? `<span>Rodada ${solution.round}</span>` : '';
+  tooltip.innerHTML = `<strong>SOL-${solution.id}</strong><span>Distância: ${solution.cost.toFixed(2)} km</span><span>Tempo: ${solution.coverage.toFixed(2)} h</span>${roundLine}`;
   tooltip.hidden = false;
   tooltip.style.left = `${Math.min(pointer.x + 12, rect.width - 132)}px`;
   tooltip.style.top = `${Math.max(3, pointer.y - 47)}px`;
@@ -1081,8 +1153,8 @@ chart.addEventListener('click', (event) => {
 });
 
 document.querySelector('#export-csv').addEventListener('click', () => {
-  const header = 'solucao,distancia_km,tempo_h,status';
-  const rows = visibleSolutions.map((solution) => `${solution.id},${solution.cost},${solution.coverage},${solution.frontier ? 'nao_dominada' : 'dominada'}`);
+  const header = 'solucao,distancia_km,tempo_h,status,rodada';
+  const rows = visibleSolutions.map((solution) => `${solution.id},${solution.cost},${solution.coverage},${solution.frontier ? 'nao_dominada' : 'dominada'},${solution.round || ''}`);
   const blob = new Blob([[header, ...rows].join('\n')], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -1208,6 +1280,7 @@ document.querySelector('#instance-selector').addEventListener('change', async (e
       await loadRunResults(state.activeRun.run_id, 0);
     } else {
       state.solutions = [];
+      state.frontiers = [];
       state.resultIsDemo = false;
       renderTable();
       if (['queued', 'running', 'cancel_requested'].includes(state.activeRun?.status)) pollRun(state.activeRun.run_id);

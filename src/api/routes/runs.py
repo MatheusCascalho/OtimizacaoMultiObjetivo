@@ -10,6 +10,11 @@ from sqlalchemy.orm import Session
 
 from api.pagination import get_pagination_args
 from infrastructure.persistence.postgres.models import CityLayout, Instance, Notification, Run, RunSolution
+from workflow_instance.domain.frontier_sampling import (
+    DEFAULT_ITERATIONS,
+    FRONTIER_REPETITIONS,
+    total_attempts,
+)
 
 
 runs_blueprint = Blueprint("runs", __name__, url_prefix="/api/v1")
@@ -28,6 +33,29 @@ def _error(code: str, message: str, status: int, details: list[dict] | None = No
         ),
         status,
     )
+
+
+def _serialize_solution(row: RunSolution) -> dict:
+    return {
+        "solution_id": row.solution_id,
+        "objective_values": row.objective_values,
+        "route": row.route,
+        "dominance": row.dominance,
+        "round": row.round_index,
+        "created_at": row.created_at.isoformat(),
+    }
+
+
+def _frontier_groups(rows: list[RunSolution]) -> list[dict]:
+    grouped: dict[int, list[dict]] = {}
+    for row in rows:
+        if row.dominance != "non_dominated":
+            continue
+        grouped.setdefault(row.round_index, []).append(_serialize_solution(row))
+    return [
+        {"round": round_index, "solutions": solutions}
+        for round_index, solutions in sorted(grouped.items())
+    ]
 
 
 def _serialize_run(run: Run) -> dict:
@@ -66,7 +94,7 @@ def create_run(instance_id: str):
         return _error("invalid_run_parameters", "Os parâmetros da execução devem ser um objeto.", 422)
     if set(requested_parameters) - {"iterations", "seed"}:
         return _error("invalid_run_parameters", "A execução aceita somente iterations e seed.", 422)
-    iterations = requested_parameters.get("iterations", 50)
+    iterations = requested_parameters.get("iterations", DEFAULT_ITERATIONS)
     seed = requested_parameters.get("seed")
     if isinstance(iterations, bool) or not isinstance(iterations, int) or not 1 <= iterations <= 100000:
         return _error("invalid_iterations", "iterations deve ser um inteiro entre 1 e 100000.", 422)
@@ -90,7 +118,7 @@ def create_run(instance_id: str):
             )
         )
         if existing is not None:
-            expected_parameters = {"iterations": iterations}
+            expected_parameters = {"iterations": iterations, "repetitions": FRONTIER_REPETITIONS}
             if seed is not None:
                 expected_parameters["seed"] = seed
             if any(existing.parameters.get(key) != value for key, value in expected_parameters.items()):
@@ -113,7 +141,11 @@ def create_run(instance_id: str):
             return _error("instance_run_active", "A instância já possui uma execução ativa.", 409)
 
         algorithm_id = instance.configuration.get("algorithm_id") or "random-heuristic"
-        parameters = {"iterations": iterations, "seed": seed if seed is not None else secrets.randbits(32)}
+        parameters = {
+            "iterations": iterations,
+            "repetitions": FRONTIER_REPETITIONS,
+            "seed": seed if seed is not None else secrets.randbits(32),
+        }
         now = datetime.now(UTC)
         run = Run(
             run_id=f"run_{uuid4().hex}",
@@ -121,7 +153,7 @@ def create_run(instance_id: str):
             algorithm_id=algorithm_id,
             status="queued",
             parameters=parameters,
-            progress={"completed": 0, "total": iterations, "percent": 0},
+            progress={"completed": 0, "total": total_attempts(iterations), "percent": 0},
             idempotency_key=idempotency_key,
             created_at=now,
             updated_at=now,
@@ -249,20 +281,21 @@ def get_run_results(run_id: str):
             .limit(limit)
             .offset(offset)
         ).all()
+        frontier_rows = session.scalars(
+            select(RunSolution)
+            .where(
+                RunSolution.run_id == run_id,
+                RunSolution.dominance == "non_dominated",
+            )
+            .order_by(RunSolution.round_index.asc(), RunSolution.solution_id.asc())
+        ).all()
         payload = {
             "run_id": run.run_id,
             "instance_id": run.instance_id,
             "status": run.status,
-            "solutions": [
-                {
-                    "solution_id": row.solution_id,
-                    "objective_values": row.objective_values,
-                    "route": row.route,
-                    "dominance": row.dominance,
-                    "created_at": row.created_at.isoformat(),
-                }
-                for row in rows
-            ],
+            "repetitions": (run.parameters or {}).get("repetitions", FRONTIER_REPETITIONS),
+            "solutions": [_serialize_solution(row) for row in rows],
+            "frontiers": _frontier_groups(frontier_rows),
             "limit": limit,
             "offset": offset,
             "total": total,
@@ -292,6 +325,7 @@ def get_run_solution(run_id: str, solution_id: str):
             "objective_values": solution.objective_values,
             "route": solution.route,
             "dominance": solution.dominance,
+            "round": solution.round_index,
             "created_at": solution.created_at.isoformat(),
         }
     return jsonify(payload), 200

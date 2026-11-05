@@ -9,6 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
+    <script src="frontier_series.js" defer></script>
     <script src="app.js" defer></script>
   </head>
   <body>
@@ -94,12 +95,12 @@
                 <div class="chart-wrap">
                   <div class="y-axis-title">Tempo (h) <span>↑</span></div>
                   <div class="chart-stage">
-                    <canvas id="pareto-chart" aria-label="Gráfico da fronteira de Pareto com tempo em horas no eixo vertical e distância em quilômetros no eixo horizontal"></canvas>
+                    <canvas id="pareto-chart" aria-label="Gráfico da fronteira de Pareto. Cada rodada aparece com uma cor própria. Tempo em horas no eixo vertical e distância em quilômetros no eixo horizontal."></canvas>
                     <div class="chart-tooltip" id="chart-tooltip" role="status" hidden></div>
                   </div>
                   <div class="x-axis-title">Distância (km) <span>→</span></div>
                 </div>
-                <div class="chart-footnote"><span><span class="key-dot frontier-key"></span>Não dominadas</span><span><span class="key-dot dominated-key"></span>Dominadas</span><span class="chart-footnote-right">Clique em um ponto para selecionar</span></div>
+                <div class="chart-footnote"><span id="frontier-round-legend" class="frontier-round-legend" hidden aria-label="Rodadas da fronteira de Pareto"></span><span id="single-frontier-key"><span class="key-dot frontier-key"></span>Não dominadas</span><span><span class="key-dot dominated-key"></span>Dominadas</span><span class="chart-footnote-right">Clique em um ponto para selecionar</span></div>
               </section>
 
               <section class="solutions-panel panel">
@@ -129,7 +130,7 @@
                 <p class="file-feedback">TSP biobjetivo · tempo e distância</p>
               </section>
 
-              <section class="model-note" id="modelos"><span class="note-mark">i</span><p><strong>TSP biobjetivo</strong><br>A RandomHeuristic amostra rotas e aproxima a fronteira; não garante ótimo global.</p><a href="#documentacao">Ver documentação <span aria-hidden="true">↗</span></a></section>
+              <section class="model-note" id="modelos"><span class="note-mark">i</span><p><strong>TSP biobjetivo</strong><br>A heurística amostra rotas e repete o mapeamento da fronteira em 5 rodadas; não garante ótimo global.</p><a href="#documentacao">Ver documentação <span aria-hidden="true">↗</span></a></section>
             </aside>
           </section>
           <section class="workspace-section" id="documentacao" aria-labelledby="documentation-title">
@@ -138,14 +139,14 @@
             <div class="documentation-grid">
               <div><span class="metric-label">ENTRADAS</span><p>Matrizes CSV quadradas, sem cabeçalho, com a mesma ordem de cidades. A API valida dimensões, valores finitos não negativos e diagonal zero.</p></div>
               <div><span class="metric-label">OBJETIVOS</span><p>Minimizar distância em quilômetros (km) e tempo em horas (h), preservando os arcos direcionados das matrizes.</p></div>
-              <div><span class="metric-label">ALGORITMO V1</span><p>A RandomHeuristic amostra rotas e estima a fronteira de Pareto. Os resultados não garantem o ótimo global.</p></div>
+              <div><span class="metric-label">ALGORITMO V1</span><p>A heurística amostra rotas e estima a fronteira de Pareto em 5 rodadas independentes. Os resultados não garantem o ótimo global.</p></div>
             </div>
           </section>
           <section class="workspace-section" id="configuracoes" aria-labelledby="settings-title">
             <p class="section-kicker">PREFERÊNCIAS LOCAIS</p>
             <h2 id="settings-title">Configurações</h2>
             <div class="settings-grid">
-              <label class="setting-field" for="run-iterations">Amostragens por execução<input id="run-iterations" type="number" min="1" max="100000" step="1" value="50"><span>Padrão 50 · mínimo 1 · máximo 100.000</span></label>
+              <label class="setting-field" for="run-iterations">Amostragens por rodada<input id="run-iterations" type="number" min="1" max="100000" step="1" value="50"><span>Padrão 50 · 5 rodadas · mínimo 1 · máximo 100.000</span></label>
               <div class="setting-field"><span>Conexão com a API</span><strong id="api-connection-state" role="status">Verificando...</strong><span>Catálogo e processamento local</span></div>
             </div>
           </section>

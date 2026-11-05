@@ -94,12 +94,17 @@ def test_results_and_notifications_are_exposed_for_completed_run(app: Flask) -> 
     assert results_response.json["run_id"] == "run_results_1"
     assert len(results_response.json["solutions"]) == 1
     assert results_response.json["solutions"][0]["dominance"] == "non_dominated"
+    assert results_response.json["solutions"][0]["round"] == 1
+    assert results_response.json["frontiers"] == [
+        {"round": 1, "solutions": [results_response.json["solutions"][0]]}
+    ]
     assert results_response.json["total"] == 1
     assert results_response.json["non_dominated"] == 1
 
     solution_response = client.get("/api/v1/runs/run_results_1/solutions/sol_1")
     assert solution_response.status_code == 200
     assert solution_response.json["objective_values"]["time"] == 3.5
+    assert solution_response.json["round"] == 1
 
     graph_response = client.get("/api/v1/runs/run_results_1/solutions/sol_1/graph")
     assert graph_response.status_code == 200
@@ -154,3 +159,70 @@ def test_results_are_blocked_before_run_completes(app: Flask) -> None:
 
     assert response.status_code == 409
     assert response.json["error"]["code"] == "run_not_completed"
+
+
+def test_results_expose_one_frontier_per_sampling_round(app: Flask) -> None:
+    with Session(app.extensions["paretolab_database_engine"]) as session:
+        session.add(
+            Instance(
+                instance_id="inst_results_rounds",
+                problem_type_id="tsp-time-distance",
+                catalog_version="1.0.0",
+                name="Instância com rodadas",
+                status="completed",
+                configuration={"algorithm_id": "random-heuristic"},
+                node_count=3,
+            )
+        )
+        session.add(
+            Run(
+                run_id="run_results_rounds",
+                instance_id="inst_results_rounds",
+                algorithm_id="random-heuristic",
+                status="completed",
+                parameters={"iterations": 50, "repetitions": 5, "seed": 3},
+                progress={"completed": 250, "total": 250, "percent": 100},
+                created_at=datetime(2026, 11, 5, tzinfo=UTC),
+                updated_at=datetime(2026, 11, 5, tzinfo=UTC),
+            )
+        )
+        for round_index in range(1, 6):
+            session.add(
+                RunSolution(
+                    solution_id=f"sol_round_{round_index}",
+                    run_id="run_results_rounds",
+                    instance_id="inst_results_rounds",
+                    objective_values={"time": float(round_index), "distance": float(10 - round_index)},
+                    route=[1, 2, 3, 1],
+                    dominance="non_dominated",
+                    round_index=round_index,
+                    created_at=datetime(2026, 11, 5, tzinfo=UTC),
+                )
+            )
+        session.add(
+            RunSolution(
+                solution_id="sol_round_dominated",
+                run_id="run_results_rounds",
+                instance_id="inst_results_rounds",
+                objective_values={"time": 9.0, "distance": 9.0},
+                route=[1, 3, 2, 1],
+                dominance="dominated",
+                round_index=1,
+                created_at=datetime(2026, 11, 5, tzinfo=UTC),
+            )
+        )
+        session.commit()
+
+    response = app.test_client().get("/api/v1/runs/run_results_rounds/results")
+
+    assert response.status_code == 200
+    assert response.json["repetitions"] == 5
+    frontiers = response.json["frontiers"]
+    assert [frontier["round"] for frontier in frontiers] == [1, 2, 3, 4, 5]
+    assert all(len(frontier["solutions"]) == 1 for frontier in frontiers)
+    assert all(frontier["solutions"][0]["dominance"] == "non_dominated" for frontier in frontiers)
+    assert "sol_round_dominated" not in {
+        solution["solution_id"]
+        for frontier in frontiers
+        for solution in frontier["solutions"]
+    }

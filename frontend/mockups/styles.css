@@ -166,8 +166,14 @@ h2 { margin: 0; font: 600 16px/1.3 var(--display); letter-spacing: 0; }
 .chart-tooltip { position: absolute; z-index: 2; min-width: 120px; padding: 8px 10px; background: var(--ink); border: 1px solid rgb(255 255 255 / 15%); color: white; pointer-events: none; border-radius: 3px; box-shadow: 0 5px 16px rgb(24 43 37 / 18%); font-size: 10px; }
 .chart-tooltip strong { display: block; margin-bottom: 4px; font: 500 10px var(--mono); }
 .chart-tooltip span { display: block; color: #d2dad2; line-height: 1.6; }
-.chart-footnote { display: flex; align-items: center; gap: 15px; min-height: 28px; margin-top: 4px; border-top: 1px solid #efefe9; color: #858e85; font-size: 9px; }
+.chart-footnote { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 15px; min-height: 28px; margin-top: 4px; border-top: 1px solid #efefe9; color: #858e85; font-size: 9px; }
 .chart-footnote > span { display: inline-flex; align-items: center; gap: 5px; }
+.frontier-round-legend { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.chart-footnote > span[hidden],
+.frontier-round-legend[hidden] { display: none; }
+.frontier-round-legend > span { display: inline-flex; align-items: center; gap: 5px; }
+.round-swatch { display: inline-block; width: 14px; height: 0; border-top: 2px solid currentColor; }
+.round-label { margin-left: 6px; color: #6d776e; font: 9px var(--mono); }
 .key-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
 .frontier-key { background: var(--green); }
 .dominated-key { border: 1px solid #aeb8ad; background: white; }

@@ -17,6 +17,7 @@ class RunSolution(Base):
     objective_values: Mapped[dict] = mapped_column(JSON, nullable=False)
     route: Mapped[list[int]] = mapped_column(JSON, nullable=False)
     dominance: Mapped[str] = mapped_column(String(32), nullable=False)
+    round_index: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )

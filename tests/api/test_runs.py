@@ -67,7 +67,8 @@ def test_run_creation_and_cancel_cycle(app: Flask) -> None:
     run_id = create_response.json["run_id"]
     assert create_response.json["status"] == "queued"
     assert create_response.json["status_url"] == f"/api/v1/runs/{run_id}"
-    assert create_response.json["parameters"] == {"iterations": 25, "seed": 7}
+    assert create_response.json["parameters"] == {"iterations": 25, "repetitions": 5, "seed": 7}
+    assert create_response.json["progress"]["total"] == 125
 
     duplicate_response = client.post(
         "/api/v1/instances/inst_runs_1/runs",
