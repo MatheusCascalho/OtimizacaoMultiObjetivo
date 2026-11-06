@@ -12,6 +12,8 @@
     <script src="frontier_series.js" defer></script>
     <script src="solution_timing.js" defer></script>
     <script src="reference_points.js" defer></script>
+    <script src="hypervolume.js" defer></script>
+    <script src="round_filter.js" defer></script>
     <script src="app.js" defer></script>
   </head>
   <body>
@@ -88,6 +90,15 @@
             <div class="metric metric-end"><span class="metric-label" id="timing-fastest-label">Solução mais rápida</span><div class="metric-value" id="timing-fastest" aria-labelledby="timing-fastest-label">--</div></div>
           </section>
 
+          <section class="timing-strip" id="hypervolume-kpis" aria-label="Qualidade da otimização">
+            <div class="metric"><span class="metric-label" id="hv-mean-label">Média do hipervolume</span><div class="metric-value" id="hv-mean" aria-labelledby="hv-mean-label">--</div></div>
+            <div class="metric"><span class="metric-label" id="hv-stdev-label">Desvio padrão do hipervolume</span><div class="metric-value" id="hv-stdev" aria-labelledby="hv-stdev-label">--</div></div>
+            <div class="metric"><span class="metric-label" id="hv-cv-label">Coeficiente de variação do hipervolume</span><div class="metric-value" id="hv-cv" aria-labelledby="hv-cv-label">--</div></div>
+            <div class="metric metric-end"><span class="metric-label" id="hv-count-label">Quantidade média nas fronteiras candidatas</span><div class="metric-value" id="hv-count" aria-labelledby="hv-count-label">--</div></div>
+          </section>
+          <p id="hypervolume-note" class="map-mode-status" hidden>O hipervolume é a área adimensional de 0 no utópico a 1 no nadir, com referência em 1,05.</p>
+          <div id="hypervolume-cards" class="hypervolume-cards" aria-label="Hipervolume por rodada"></div>
+
           <section class="input-preview panel" id="input-preview" aria-labelledby="input-preview-title" hidden>
             <div class="panel-heading preview-heading"><div><p class="section-kicker">INSPEÇÃO DOS DADOS</p><h2 id="input-preview-title">Análise prévia</h2></div><div class="segmented-control" role="group" aria-label="Objetivo da análise prévia"><button class="segment active" type="button" data-objective="time">Tempo</button><button class="segment" type="button" data-objective="distance">Distância</button></div></div>
             <div class="preview-content"><div class="preview-graph"><div class="preview-graph-heading"><p class="metric-label">GRAFO · <span id="preview-objective-label">TEMPO</span></p><label class="neighbor-control" for="neighbors-per-city">Vizinhos/cidade <input id="neighbors-per-city" type="number" min="1" value="20" step="1"></label><span class="metric-label" id="preview-neighbor-count"></span></div><canvas id="input-graph" role="img" aria-label="Grafo da instância"></canvas></div><div class="preview-matrix"><p class="metric-label">MATRIZ · <span id="matrix-objective-label">TEMPO</span> <span id="matrix-size"></span> <span id="matrix-scale"></span></p><div class="matrix-scroll"><table id="matrix-table" class="matrix-table"></table></div></div></div>
@@ -98,12 +109,14 @@
               <section class="chart-panel panel">
                 <div class="panel-heading chart-heading">
                   <div><p class="section-kicker">MAPA DE DECISÃO <span class="live-dot"></span></p><h2>Fronteira de Pareto</h2></div>
-                  <div class="chart-controls"><div class="segmented-control" role="tablist" aria-label="Visualização do gráfico"><button class="segment active" id="tab-frontier" type="button" role="tab" aria-selected="true" data-view="frontier">Fronteira</button><button class="segment" id="tab-all" type="button" role="tab" aria-selected="false" data-view="all">Todas</button></div><button class="icon-button chart-menu" type="button" aria-label="Opções do gráfico" title="Opções do gráfico">···</button></div>
+                  <div class="chart-controls"><div class="segmented-control" role="tablist" aria-label="Visualização do gráfico"><button class="segment active" id="tab-frontier" type="button" role="tab" aria-selected="true" data-view="frontier">Fronteira</button><button class="segment" id="tab-all" type="button" role="tab" aria-selected="false" data-view="all">Todas</button></div><button class="button button-light" id="toggle-chart-expand" type="button" aria-pressed="false">Ampliar mapa</button><button class="icon-button chart-menu" type="button" aria-label="Opções do gráfico" title="Opções do gráfico">···</button></div>
                 </div>
                 <div class="chart-legend"><span><i class="legend-dot coral-dot"></i>Distância <b>minimizar · km</b></span><span><i class="legend-dot blue-dot"></i>Tempo <b>minimizar · h</b></span><span class="demo-tag" id="data-mode-tag">DADOS ILUSTRATIVOS</span></div>
-                <div class="reference-controls" role="group" aria-label="Controles do mapa de decisão"><label class="reference-toggle"><input id="toggle-reference-points" type="checkbox" checked>Mostrar solução utópica e solução antiutópica</label><label class="reference-toggle"><input id="toggle-normalized-scale" type="checkbox">Escalarizar pelo utópico e pelo nadir</label><label class="reference-toggle"><input id="toggle-dominance-cone" type="checkbox" aria-describedby="cone-status">Exibir cone de dominância</label><label class="reference-toggle"><input id="toggle-approximate-frontier" type="checkbox">Exibir fronteira aproximada</label></div>
+                <div class="reference-controls" role="group" aria-label="Controles do mapa de decisão"><label class="reference-toggle"><input id="toggle-reference-points" type="checkbox" checked>Mostrar solução utópica e solução antiutópica</label><label class="reference-toggle"><input id="toggle-normalized-scale" type="checkbox">Escalarizar pelo utópico e pelo nadir</label><label class="reference-toggle"><input id="toggle-dominance-cone" type="checkbox" aria-describedby="cone-status">Exibir cone de dominância</label><label class="reference-toggle"><input id="toggle-approximate-frontier" type="checkbox">Exibir fronteira aproximada</label><label class="reference-toggle"><input id="toggle-hypervolume" type="checkbox" aria-describedby="hypervolume-status">Exibir hipervolume das rodadas</label></div>
+                <div class="round-filters" id="round-filters" role="group" aria-label="Filtrar rodadas do mapa" hidden><button class="button button-light" id="show-all-rounds" type="button">Todas</button><div id="round-filter-options"></div></div>
                 <p id="scale-status" class="map-mode-status" hidden>Os pontos de referência ainda não estão disponíveis para escalarizar o mapa.</p>
                 <p id="cone-status" class="map-mode-status" hidden>Selecione uma solução para exibir o cone de dominância.</p>
+                <p id="hypervolume-status" class="map-mode-status" hidden>O hipervolume ainda não está disponível para esta execução.</p>
                 <div class="chart-wrap">
                   <div class="y-axis-title" id="y-axis-title">Tempo (h) <span>↑</span></div>
                   <div class="chart-stage">
@@ -112,7 +125,7 @@
                   </div>
                   <div class="x-axis-title" id="x-axis-title">Distância (km) <span>→</span></div>
                 </div>
-                <div class="chart-footnote"><span id="frontier-round-legend" class="frontier-round-legend" hidden aria-label="Rodadas da fronteira de Pareto"></span><span id="single-frontier-key"><span class="key-dot frontier-key"></span>Não dominadas</span><span id="dominated-key"><span class="key-dot dominated-key"></span>Dominadas</span><span id="reference-key-utopian" hidden><span class="key-diamond" aria-hidden="true"></span>Solução utópica</span><span id="reference-key-antiutopian" hidden><span class="key-square" aria-hidden="true"></span>Solução antiutópica</span><span id="cone-key" hidden><span class="key-hatch" aria-hidden="true"></span>Cone de dominância</span><span id="approximate-frontier-key" hidden>Fronteira aproximada da união</span><span id="scale-key" hidden>0% no utópico, 100% no nadir</span><span class="chart-footnote-right">Clique em um ponto para selecionar</span></div>
+                <div class="chart-footnote"><span id="frontier-round-legend" class="frontier-round-legend" hidden aria-label="Rodadas da fronteira de Pareto"></span><span id="single-frontier-key"><span class="key-dot frontier-key"></span>Não dominadas</span><span id="dominated-key"><span class="key-dot dominated-key"></span>Dominadas</span><span id="reference-key-utopian" hidden><span class="key-diamond" aria-hidden="true"></span>Solução utópica</span><span id="reference-key-antiutopian" hidden><span class="key-square" aria-hidden="true"></span>Solução antiutópica</span><span id="cone-key" hidden><span class="key-hatch" aria-hidden="true"></span>Cone de dominância</span><span id="approximate-frontier-key" hidden>Fronteira aproximada da união</span><span id="scale-key" hidden>0% no utópico, 100% no nadir</span><span id="hypervolume-key" hidden><span class="key-hatch" aria-hidden="true"></span>Área do hipervolume da rodada</span><span class="chart-footnote-right">Clique em um ponto para selecionar</span></div>
               </section>
 
               <section class="solutions-panel panel">

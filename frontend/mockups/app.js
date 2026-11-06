@@ -51,7 +51,12 @@ const state = {
   showNormalizedScale: false,
   showDominanceCone: false,
   showApproximateFrontier: false,
+  showHypervolume: false,
+  chartExpanded: false,
+  hiddenRounds: new Set(),
   referencePoints: null,
+  hypervolume: null,
+  hypervolumeRunId: null,
   referenceRunId: null,
 };
 
@@ -173,6 +178,46 @@ function initializeLocalSettings() {
       renderTable();
     });
   });
+
+  const hypervolumeToggle = document.querySelector('#toggle-hypervolume');
+  if (hypervolumeToggle && window.Hypervolume) {
+    state.showHypervolume = Hypervolume.readShowHypervolume(window.localStorage);
+    hypervolumeToggle.checked = state.showHypervolume;
+    hypervolumeToggle.addEventListener('change', () => {
+      state.showHypervolume = hypervolumeToggle.checked;
+      try {
+        Hypervolume.writeShowHypervolume(window.localStorage, state.showHypervolume);
+      } catch {
+        setApiStatus('A preferência vale apenas para esta sessão.', true);
+      }
+      renderTable();
+    });
+  }
+
+  const expandButton = document.querySelector('#toggle-chart-expand');
+  if (expandButton && window.Hypervolume) {
+    const applyExpansion = () => {
+      const expansion = Hypervolume.chartExpansionState(state.chartExpanded);
+      expandButton.textContent = expansion.label;
+      expandButton.setAttribute('aria-pressed', expansion.ariaPressed);
+      document.querySelector('.chart-panel')?.classList.toggle('is-expanded', expansion.expanded);
+    };
+    applyExpansion();
+    expandButton.addEventListener('click', () => {
+      state.chartExpanded = !state.chartExpanded;
+      applyExpansion();
+      drawChart();
+    });
+  }
+
+  const showAllRounds = document.querySelector('#show-all-rounds');
+  if (showAllRounds) {
+    showAllRounds.addEventListener('click', () => {
+      state.hiddenRounds = window.RoundFilter ? RoundFilter.showAllRounds() : new Set();
+      state.tableOffset = 0;
+      renderTable();
+    });
+  }
 }
 
 function applyInstanceSummary(instance) {
@@ -433,6 +478,26 @@ function setTimingValue(selector, value, note) {
   }
 }
 
+function setHypervolumeCoefficient(view) {
+  const node = document.querySelector('#hv-cv');
+  if (!node) return;
+  if (!view || !view.cvUnavailable) {
+    node.removeAttribute('aria-label');
+    node.setAttribute('aria-labelledby', 'hv-cv-label');
+    setTimingValue('#hv-cv', view ? view.cv : '--');
+    return;
+  }
+  node.removeAttribute('aria-labelledby');
+  node.setAttribute('aria-label', 'Coeficiente de variação do hipervolume, indisponível');
+  const visible = document.createElement('span');
+  visible.setAttribute('aria-hidden', 'true');
+  visible.textContent = view.cv;
+  const status = document.createElement('span');
+  status.className = 'sr-only';
+  status.textContent = view.cvStatus || 'indisponível';
+  node.replaceChildren(visible, status);
+}
+
 function renderSolutionTiming(timing) {
   const api = window.SolutionTiming;
   const view = api && typeof api.solutionTimingViewOrEmpty === 'function'
@@ -452,15 +517,28 @@ function renderSolutionTiming(timing) {
 }
 
 function chartFrontierSolutions() {
-  if (state.frontiers.length) {
-    return state.frontiers.flatMap((frontier) => frontier.points);
-  }
-  return state.solutions;
+  const points = state.frontiers.length
+    ? state.frontiers.flatMap((frontier) => frontier.points)
+    : state.solutions;
+  return filterVisibleRoundSolutions(points);
 }
 
 function clearReferencePoints() {
   state.referencePoints = null;
   state.referenceRunId = null;
+  state.hypervolume = null;
+  state.hypervolumeRunId = null;
+  state.hiddenRounds = new Set();
+}
+
+function filterVisibleRoundSolutions(solutions) {
+  if (!window.RoundFilter) return solutions || [];
+  return RoundFilter.filterSolutions(solutions, state.hiddenRounds);
+}
+
+function isSolutionRoundVisible(solution) {
+  if (!solution || !window.RoundFilter) return Boolean(solution);
+  return RoundFilter.isRoundVisible(solution.round, state.hiddenRounds);
 }
 
 function displayedReferencePoints() {
@@ -487,7 +565,7 @@ function unionChartSolutions() {
 
 function approximateDisplay() {
   if (!state.showApproximateFrontier || !window.ReferencePoints) return null;
-  const solutions = unionChartSolutions();
+  const solutions = filterVisibleRoundSolutions(unionChartSolutions());
   const classified = ReferencePoints.classifyApproximateFrontier(solutions, objectiveDirections());
   return {
     ...classified,
@@ -519,6 +597,19 @@ async function loadRunResults(runId, offset) {
     } catch (error) {
       clearReferencePoints();
       setApiStatus(`Não foi possível calcular os pontos de referência: ${error.message}`, true);
+    }
+  }
+  if (state.hypervolumeRunId !== runId && window.Hypervolume) {
+    try {
+      state.hypervolume = Hypervolume.mapApiHypervolume(await fetchJson(`/runs/${runId}/hypervolume`));
+      state.hypervolumeRunId = state.hypervolume ? runId : null;
+      if (!state.hypervolume) {
+        setApiStatus('A resposta do hipervolume não pôde ser lida.', true);
+      }
+    } catch (error) {
+      state.hypervolume = null;
+      state.hypervolumeRunId = null;
+      setApiStatus(`Não foi possível calcular o hipervolume: ${error.message}`, true);
     }
   }
   selectedId = state.solutions[0]?.id || null;
@@ -1041,7 +1132,7 @@ let plottedReferences = [];
 function renderTable() {
   const query = searchInput.value.trim().toLowerCase();
   const approximate = approximateDisplay();
-  const source = approximate ? approximate.solutions : state.solutions;
+  const source = filterVisibleRoundSolutions(approximate ? approximate.solutions : state.solutions);
   visibleSolutions = source.filter((solution) => {
     const matchesSearch = `${solution.id} ${solution.cost} ${solution.coverage}`.toLowerCase().includes(query);
     const matchesView = Boolean(approximate) || activeView === 'all' || solution.frontier;
@@ -1084,8 +1175,10 @@ function renderTable() {
     && (state.resultIsDemo || state.resultOffset + state.solutions.length >= state.resultTotal);
   document.querySelector('#page-indicator').textContent = `${Math.floor(state.tableOffset / state.tablePageSize) + 1} / ${Math.max(1, Math.ceil(visibleSolutions.length / state.tablePageSize))}`;
   document.querySelector('#export-csv').disabled = !state.resultIsDemo && !state.solutions.length && !approximate;
+  renderRoundFilters();
   drawChart();
   renderReferenceDistance();
+  renderHypervolume();
   renderMapModeStatus();
   syncRoutePreview();
 }
@@ -1108,18 +1201,25 @@ function drawChart() {
   const approximate = approximateDisplay();
   const approximatePoints = approximate ? approximate.frontier : null;
   const selected = findDisplayedSolution(selectedId);
+  const selectedVisible = isSolutionRoundVisible(selected) ? selected : null;
   const axisPoint = (point) => (
     scaleActive ? ReferencePoints.normalizeToPercent(point, referenceForScale) : { cost: point.cost, coverage: point.coverage }
   );
   const scalePoints = [];
   const seenScaleIds = new Set();
-  (approximate ? approximate.solutions : chartFrontierSolutions().concat(state.solutions)).forEach((solution) => {
+  (approximate ? approximate.solutions : chartFrontierSolutions().concat(filterVisibleRoundSolutions(state.solutions))).forEach((solution) => {
     if (seenScaleIds.has(solution.id)) return;
     seenScaleIds.add(solution.id);
     scalePoints.push(solution);
   });
   if (referencePoints) scalePoints.push(referencePoints.utopian, referencePoints.antiutopian);
-  if (selected) scalePoints.push(selected);
+  if (selectedVisible) scalePoints.push(selectedVisible);
+  const chartReference = state.showHypervolume && window.Hypervolume
+    ? Hypervolume.objectiveReferencePoint(displayedReferencePoints())
+    : null;
+  if (chartReference && Number.isFinite(chartReference.cost) && Number.isFinite(chartReference.coverage)) {
+    scalePoints.push(chartReference);
+  }
   const axisValues = scalePoints.map(axisPoint);
   const costs = axisValues.map((point) => point.cost);
   const coverages = axisValues.map((point) => point.coverage);
@@ -1155,6 +1255,7 @@ function drawChart() {
       referencePoints ? 'A solução utópica e a solução antiutópica também estão marcadas.' : '',
       state.showDominanceCone ? 'O cone de dominância sombreia a região pior ou igual à solução selecionada.' : '',
       approximate ? 'A fronteira aproximada da união está em destaque e as soluções dominadas continuam visíveis.' : '',
+      state.showHypervolume ? 'A área do hipervolume de cada rodada está anotada no mapa.' : '',
     ].filter(Boolean).join(' '),
   );
 
@@ -1189,6 +1290,7 @@ function drawChart() {
     chartContext.fillText(formatTick(value), position, height - 11);
   }
 
+  const hypervolumeLabels = state.showHypervolume ? shadeHypervolume(place, inset, width, height) : [];
   const series = approximatePoints
     ? [{
       round: null,
@@ -1199,7 +1301,7 @@ function drawChart() {
     }]
     : ParetoFrontierSeries.frontierSeriesFromSolutions(chartFrontierSolutions());
   const multiRound = !approximatePoints && series.some((item) => item.round != null);
-  if (selected && state.showDominanceCone) shadeDominanceCone(place(selected), directionsWorseToward(scaleActive), inset, width, height);
+  if (selectedVisible && state.showDominanceCone) shadeDominanceCone(place(selectedVisible), directionsWorseToward(scaleActive), inset, width, height);
   ParetoFrontierSeries.strokeFrontierSeries(chartContext, series, (solution) => place(solution));
   renderRoundLegend(series);
   const approximateKey = document.querySelector('#approximate-frontier-key');
@@ -1216,7 +1318,9 @@ function drawChart() {
   }
   if (approximateKey) approximateKey.hidden = !approximatePoints;
   if (scaleKey) scaleKey.hidden = !scaleActive;
-  if (coneKey) coneKey.hidden = !(state.showDominanceCone && selected);
+  if (coneKey) coneKey.hidden = !(state.showDominanceCone && selectedVisible);
+  const hypervolumeKey = document.querySelector('#hypervolume-key');
+  if (hypervolumeKey) hypervolumeKey.hidden = !state.showHypervolume || !hypervolumeLabels.length;
   const utopianKey = document.querySelector('#reference-key-utopian');
   const antiutopianKey = document.querySelector('#reference-key-antiutopian');
   if (utopianKey) utopianKey.hidden = !referencePoints;
@@ -1228,8 +1332,8 @@ function drawChart() {
 
   plottedPoints = [];
   plottedReferences = [];
-  if (referencePoints && selected?.frontier) {
-    const origin = place(selected);
+  if (referencePoints && selectedVisible?.frontier) {
+    const origin = place(selectedVisible);
     [referencePoints.utopian, referencePoints.antiutopian].forEach((anchor) => {
       const target = place(anchor);
       chartContext.beginPath();
@@ -1246,15 +1350,15 @@ function drawChart() {
   let pointsToDraw = approximate
     ? approximate.solutions
     : activeView === 'all'
-      ? frontierPoints.concat(state.solutions.filter((solution) => !solution.frontier && !frontierPoints.some((point) => point.id === solution.id)))
+      ? frontierPoints.concat(filterVisibleRoundSolutions(state.solutions).filter((solution) => !solution.frontier && !frontierPoints.some((point) => point.id === solution.id)))
       : frontierPoints;
-  if (selected && state.showDominanceCone && !pointsToDraw.some((point) => point.id === selected.id)) {
-    pointsToDraw = pointsToDraw.concat(selected);
+  if (selectedVisible && state.showDominanceCone && !pointsToDraw.some((point) => point.id === selectedVisible.id)) {
+    pointsToDraw = pointsToDraw.concat(selectedVisible);
   }
-  if (state.showDominanceCone && selected && window.ReferencePoints) {
+  if (state.showDominanceCone && selectedVisible && window.ReferencePoints) {
     pointsToDraw = ReferencePoints.visibleUnderCone(
       pointsToDraw,
-      selected,
+      selectedVisible,
       referenceForScale || { directions: objectiveDirections() },
       scaleActive,
     );
@@ -1288,6 +1392,9 @@ function drawChart() {
       chartContext.lineWidth = 4;
       chartContext.stroke();
     }
+  });
+  hypervolumeLabels.forEach((label) => {
+    drawReferenceLabel(label.text, label.x, label.y, true, width, height, inset);
   });
   if (!referencePoints) return;
   const anchors = [referencePoints.antiutopian, referencePoints.utopian];
@@ -1354,8 +1461,149 @@ function shadeDominanceCone(origin, signs, inset, width, height) {
 function renderMapModeStatus() {
   const scaleStatus = document.querySelector('#scale-status');
   const coneStatus = document.querySelector('#cone-status');
+  const hypervolumeStatus = document.querySelector('#hypervolume-status');
   if (scaleStatus) scaleStatus.hidden = !(state.showNormalizedScale && !displayedReferencePoints());
-  if (coneStatus) coneStatus.hidden = !(state.showDominanceCone && !findDisplayedSolution(selectedId));
+  if (coneStatus) coneStatus.hidden = !(state.showDominanceCone && !isSolutionRoundVisible(findDisplayedSolution(selectedId)));
+  if (hypervolumeStatus) hypervolumeStatus.hidden = !(state.showHypervolume && !currentHypervolume());
+}
+
+function currentHypervolume() {
+  if (!state.resultIsDemo && state.hypervolume) return state.hypervolume;
+  if (state.resultIsDemo && window.Hypervolume) {
+    return Hypervolume.summarizeChartSolutions(unionChartSolutions(), objectiveDirections());
+  }
+  return null;
+}
+
+function candidatePointsForRound(round) {
+  const frontier = state.frontiers.find((item) => item.round === round);
+  if (frontier && frontier.points.length) return frontier.points;
+  return unionChartSolutions().filter((solution) => (solution.round || 1) === round && solution.frontier);
+}
+
+function hypervolumeForChart() {
+  const summary = currentHypervolume();
+  if (!summary) return null;
+  const rounds = window.RoundFilter
+    ? RoundFilter.filterHypervolumeRounds(summary.rounds, state.hiddenRounds)
+    : summary.rounds;
+  return {
+    ...summary,
+    rounds: rounds.map((round) => ({
+      ...round,
+      points: filterVisibleRoundSolutions(
+        round.points && round.points.length ? round.points : candidatePointsForRound(round.round),
+      ),
+    })),
+  };
+}
+
+function shadeHypervolume(place, inset, width, height) {
+  const summary = hypervolumeForChart();
+  const labels = [];
+  if (!summary || !window.ParetoFrontierSeries || !window.Hypervolume) return labels;
+  const chartReference = Hypervolume.objectiveReferencePoint(displayedReferencePoints());
+  const canDrawArea = Boolean(
+    chartReference && Number.isFinite(chartReference.cost) && Number.isFinite(chartReference.coverage),
+  );
+  const styles = ParetoFrontierSeries.FRONTIER_ROUND_STYLES;
+  const directions = objectiveDirections();
+  const minimizedCost = (point) => (directions.cost === 'maximize' ? -point.cost : point.cost);
+  const minimizedCoverage = (point) => (directions.coverage === 'maximize' ? -point.coverage : point.coverage);
+  chartContext.save();
+  chartContext.beginPath();
+  chartContext.rect(inset.left, inset.top, width - inset.left - inset.right, height - inset.top - inset.bottom);
+  chartContext.clip();
+  summary.rounds.forEach((round) => {
+    const points = (round.points || []).filter((point) => Number.isFinite(point.cost) && Number.isFinite(point.coverage));
+    if (!points.length) return;
+    const style = styles.find((item) => item.round === round.round) || styles[(Math.max(round.round, 1) - 1) % styles.length];
+    const ordered = points.slice().sort((left, right) => (
+      minimizedCost(left) - minimizedCost(right) || minimizedCoverage(right) - minimizedCoverage(left)
+    ));
+    if (canDrawArea) ordered.forEach((point, index) => {
+      const current = place(point);
+      const nextCost = index === ordered.length - 1 ? chartReference.cost : ordered[index + 1].cost;
+      const corner = place({ cost: nextCost, coverage: chartReference.coverage });
+      const left = Math.min(current.x, corner.x);
+      const top = Math.min(current.y, corner.y);
+      const rectWidth = Math.abs(corner.x - current.x);
+      const rectHeight = Math.abs(corner.y - current.y);
+      if (rectWidth < 1 || rectHeight < 1) return;
+      chartContext.save();
+      chartContext.beginPath();
+      chartContext.rect(left, top, rectWidth, rectHeight);
+      chartContext.clip();
+      chartContext.fillStyle = 'rgb(24 43 37 / 12%)';
+      chartContext.fillRect(left, top, rectWidth, rectHeight);
+      chartContext.strokeStyle = 'rgb(24 43 37 / 50%)';
+      chartContext.lineWidth = 1;
+      chartContext.setLineDash([]);
+      chartContext.beginPath();
+      const span = Math.max(rectWidth, rectHeight);
+      for (let offset = -span; offset < span; offset += 8) {
+        chartContext.moveTo(left + offset, top + rectHeight);
+        chartContext.lineTo(left + offset + rectHeight, top);
+      }
+      chartContext.stroke();
+      chartContext.restore();
+      chartContext.strokeStyle = style.color;
+      chartContext.lineWidth = 1.25;
+      chartContext.setLineDash(style.dash || []);
+      chartContext.strokeRect(left, top, rectWidth, rectHeight);
+    });
+    chartContext.setLineDash([]);
+    const anchor = place(ordered[Math.floor(ordered.length / 2)]);
+    labels.push({
+      text: `Rodada ${round.round} · HV ${Hypervolume.formatHypervolume(round.hypervolume)}`,
+      x: anchor.x,
+      y: anchor.y,
+    });
+  });
+  chartContext.restore();
+  return labels;
+}
+
+function renderHypervolume() {
+  const cards = document.querySelector('#hypervolume-cards');
+  const note = document.querySelector('#hypervolume-note');
+  const summary = currentHypervolume();
+  const view = window.Hypervolume ? Hypervolume.hypervolumeView(summary) : null;
+  if (!view || !cards) {
+    setTimingValue('#hv-mean', '--');
+    setTimingValue('#hv-stdev', '--');
+    setHypervolumeCoefficient(null);
+    setTimingValue('#hv-count', '--');
+    if (cards) cards.replaceChildren();
+    if (note) note.hidden = true;
+    return;
+  }
+  setTimingValue('#hv-mean', view.mean);
+  setTimingValue('#hv-stdev', view.stdev);
+  setHypervolumeCoefficient(view);
+  setTimingValue('#hv-count', view.meanCount);
+  const visibleCards = window.RoundFilter
+    ? view.cards.filter((card) => RoundFilter.isRoundVisible(card.round, state.hiddenRounds))
+    : view.cards;
+  if (note) {
+    note.hidden = !view.note;
+    note.textContent = view.note;
+  }
+  cards.replaceChildren(...visibleCards.map((card) => {
+    const article = document.createElement('article');
+    article.className = 'hypervolume-card';
+    article.setAttribute('aria-label', card.title);
+    const title = document.createElement('h3');
+    title.textContent = card.title;
+    const hypervolume = document.createElement('p');
+    hypervolume.append('Hipervolume ', Object.assign(document.createElement('strong'), { textContent: card.hypervolume }));
+    const count = document.createElement('p');
+    count.textContent = card.candidateCount;
+    const distance = document.createElement('p');
+    distance.append('Distância ao hipervolume médio ', Object.assign(document.createElement('strong'), { textContent: card.distance }));
+    article.append(title, hypervolume, count, distance);
+    return article;
+  }));
 }
 
 function drawReferenceMarker(anchor, px, py) {
@@ -1432,6 +1680,29 @@ function renderReferenceDistance() {
   document.querySelector('#distance-antiutopian').textContent = ReferencePoints.formatObjectiveDistance(measurement.toAntiutopian);
   const warning = (points.warnings || []).map((item) => item.message).filter(Boolean).join(' ');
   note.textContent = [points.distanceNote, points.note, warning].filter(Boolean).join(' ');
+}
+
+function renderRoundFilters() {
+  const bar = document.querySelector('#round-filters');
+  const host = document.querySelector('#round-filter-options');
+  if (!bar || !host || !window.RoundFilter) return;
+  const rounds = RoundFilter.listedRounds(unionChartSolutions(), state.frontiers);
+  bar.hidden = rounds.length < 2;
+  host.replaceChildren(...rounds.map((round) => {
+    const label = document.createElement('label');
+    label.className = 'reference-toggle';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = RoundFilter.isRoundVisible(round, state.hiddenRounds);
+    input.addEventListener('change', () => {
+      if (input.checked) state.hiddenRounds.delete(round);
+      else state.hiddenRounds.add(round);
+      state.tableOffset = 0;
+      renderTable();
+    });
+    label.append(input, document.createTextNode(`Rodada ${round}`));
+    return label;
+  }));
 }
 
 function renderRoundLegend(series) {

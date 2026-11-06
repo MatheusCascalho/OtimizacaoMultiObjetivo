@@ -10,7 +10,12 @@ from sqlalchemy.orm import Session
 
 from api.pagination import get_pagination_args
 from infrastructure.persistence.postgres.models import CityLayout, Instance, Notification, Run, RunSolution
-from multiobjective_algorithms import ObjectiveSpec, ReferencePointError, estimate_reference_points
+from multiobjective_algorithms import (
+    ObjectiveSpec,
+    ReferencePointError,
+    estimate_reference_points,
+    summarize_run_hypervolume,
+)
 from workflow_instance.domain.frontier_sampling import (
     DEFAULT_ITERATIONS,
     FRONTIER_REPETITIONS,
@@ -405,6 +410,86 @@ def _reference_points_payload(run_id: str, problem_type: dict, result) -> dict:
             "A solução antiutópica é o nadir da fronteira, não o pior ponto da região viável."
         ),
         "warnings": [{"code": warning.code, "message": warning.message} for warning in result.warnings],
+    }
+
+
+@runs_blueprint.get("/runs/<run_id>/hypervolume")
+def get_run_hypervolume(run_id: str):
+    engine = current_app.extensions["paretolab_database_engine"]
+    with Session(engine) as session:
+        run = session.get(Run, run_id)
+        if run is None:
+            return _error("run_not_found", "A execução solicitada não existe.", 404)
+        if run.status != "completed":
+            return _error(
+                "run_not_completed",
+                "O hipervolume só está disponível após a conclusão da execução.",
+                409,
+            )
+        instance = session.get(Instance, run.instance_id)
+        if instance is None:
+            return _error("instance_not_found", "A instância da execução não existe.", 404)
+        problem_type = current_app.extensions["paretolab_catalog"].get_problem_type(instance.problem_type_id)
+        if problem_type is None:
+            return _error(
+                "unknown_problem_type",
+                "O tipo de problema da instância não está no catálogo.",
+                422,
+            )
+        rows = session.scalars(select(RunSolution).where(RunSolution.run_id == run_id)).all()
+        try:
+            objectives = _reference_objectives(problem_type, rows)
+            summary = summarize_run_hypervolume(
+                [
+                    {"round": row.round_index, **(row.objective_values or {})}
+                    for row in rows
+                ],
+                objectives,
+            )
+        except ReferencePointError as error:
+            details = [{"stage": error.stage}] if error.stage else []
+            return _error("hypervolume_unavailable", str(error), 409, details)
+        except ValueError as error:
+            return _error("invalid_hypervolume", str(error), 422)
+        payload = _hypervolume_payload(run.run_id, problem_type, objectives, summary)
+    return jsonify(payload), 200
+
+
+def _hypervolume_payload(run_id: str, _problem_type: dict, objectives: tuple[ObjectiveSpec, ...], summary) -> dict:
+    objective_ids = [spec.id for spec in objectives]
+
+    def named(values: tuple[float, ...]) -> dict:
+        return {objective_id: values[index] for index, objective_id in enumerate(objective_ids)}
+
+    return {
+        "run_id": run_id,
+        "reference_shift": summary.reference_shift,
+        "space": "normalized_objectives",
+        "unit": None,
+        "standard_deviation": "sample",
+        "nadir": named(summary.nadir),
+        "reference_point": named(summary.reference_point),
+        "rounds": [
+            {
+                "round": item.round_index,
+                "hypervolume": item.hypervolume,
+                "candidate_count": item.candidate_count,
+                "distance_to_mean": item.distance_to_mean,
+            }
+            for item in summary.rounds
+        ],
+        "mean_hypervolume": summary.mean_hypervolume,
+        "sample_stdev_hypervolume": summary.sample_stdev_hypervolume,
+        "coefficient_of_variation": summary.coefficient_of_variation,
+        "mean_candidate_count": summary.mean_candidate_count,
+        "note": (
+            "Área adimensional no espaço normalizado: cada objetivo vai de 0 no utópico a 1 no nadir. "
+            "A referência é 1,05 em cada eixo com faixa positiva, depois da normalização, "
+            "e vale para todas as rodadas. Faixa nula permanece 0. "
+            "O desvio padrão é amostral (n − 1); com uma rodada ele vale 0. "
+            "O coeficiente de variação é esse desvio dividido pela média de todas as rodadas; "
+            "se a média é 0, o coeficiente não é calculado e o valor é nulo."
+        ),
     }
 
 

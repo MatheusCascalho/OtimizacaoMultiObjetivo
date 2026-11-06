@@ -49,7 +49,7 @@ test('frontend image ships every local script the page loads', () => {
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
   const dockerfile = fs.readFileSync(path.join(root, 'Dockerfile'), 'utf8');
   const scripts = [...html.matchAll(/<script src="([^"]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(scripts, ['frontier_series.js', 'solution_timing.js', 'reference_points.js', 'app.js']);
+  assert.deepEqual(scripts, ['frontier_series.js', 'solution_timing.js', 'reference_points.js', 'hypervolume.js', 'round_filter.js', 'app.js']);
   scripts.forEach((script) => {
     assert.match(dockerfile, new RegExp(script.replace('.', '\\.')));
   });
