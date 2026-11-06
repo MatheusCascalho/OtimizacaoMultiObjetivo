@@ -1,5 +1,25 @@
 """Reusable multiobjective analysis tools."""
 
 from multiobjective_algorithms.dominance import non_dominated_mask
+from multiobjective_algorithms.reference_points import (
+    ObjectiveSpec,
+    ReferencePointError,
+    ReferencePoints,
+    ReferenceWarning,
+    compute_reference_points,
+    estimate_reference_points,
+    euclidean_distance,
+    normalize_objectives,
+)
 
-__all__ = ["non_dominated_mask"]
+__all__ = [
+    "ObjectiveSpec",
+    "ReferencePointError",
+    "ReferencePoints",
+    "ReferenceWarning",
+    "compute_reference_points",
+    "estimate_reference_points",
+    "euclidean_distance",
+    "non_dominated_mask",
+    "normalize_objectives",
+]

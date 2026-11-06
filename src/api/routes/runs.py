@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from api.pagination import get_pagination_args
 from infrastructure.persistence.postgres.models import CityLayout, Instance, Notification, Run, RunSolution
+from multiobjective_algorithms import ObjectiveSpec, ReferencePointError, estimate_reference_points
 from workflow_instance.domain.frontier_sampling import (
     DEFAULT_ITERATIONS,
     FRONTIER_REPETITIONS,
@@ -304,6 +305,107 @@ def get_run_results(run_id: str):
             "non_dominated": non_dominated,
         }
     return jsonify(payload), 200
+
+
+@runs_blueprint.get("/runs/<run_id>/reference-points")
+def get_run_reference_points(run_id: str):
+    engine = current_app.extensions["paretolab_database_engine"]
+    with Session(engine) as session:
+        run = session.get(Run, run_id)
+        if run is None:
+            return _error("run_not_found", "A execução solicitada não existe.", 404)
+        if run.status != "completed":
+            return _error(
+                "run_not_completed",
+                "Os pontos de referência só estão disponíveis após a conclusão da execução.",
+                409,
+            )
+        instance = session.get(Instance, run.instance_id)
+        if instance is None:
+            return _error("instance_not_found", "A instância da execução não existe.", 404)
+        problem_type = current_app.extensions["paretolab_catalog"].get_problem_type(instance.problem_type_id)
+        if problem_type is None:
+            return _error(
+                "unknown_problem_type",
+                "O tipo de problema da instância não está no catálogo.",
+                422,
+            )
+        rows = session.scalars(select(RunSolution).where(RunSolution.run_id == run_id)).all()
+        try:
+            objectives = _reference_objectives(problem_type, rows)
+            result = estimate_reference_points(
+                [row.objective_values for row in rows],
+                objectives,
+            )
+        except ReferencePointError as error:
+            details = [{"stage": error.stage}] if error.stage else []
+            return _error("reference_points_unavailable", str(error), 409, details)
+        except ValueError as error:
+            return _error("invalid_reference_points", str(error), 422)
+        payload = _reference_points_payload(run.run_id, problem_type, result)
+    return jsonify(payload), 200
+
+
+def _reference_objectives(problem_type: dict, rows: list[RunSolution]) -> tuple[ObjectiveSpec, ...]:
+    catalog = problem_type.get("objectives") or []
+    catalog_ids = [item["id"] for item in catalog]
+    if len(catalog_ids) != 2 or len(set(catalog_ids)) != 2:
+        raise ValueError(
+            "O cálculo da solução utópica e da solução antiutópica exige exatamente 2 objetivos."
+        )
+    if not rows:
+        raise ReferencePointError("Não há soluções mapeadas para estimar os pontos de referência.")
+    sample_ids = {key for row in rows for key in (row.objective_values or {})}
+    if sample_ids != set(catalog_ids):
+        raise ValueError("Os objetivos da execução não coincidem com o catálogo do problema.")
+    specs: list[ObjectiveSpec] = []
+    for item in catalog:
+        direction = item.get("direction")
+        if direction not in {"minimize", "maximize"}:
+            raise ValueError("A direção do objetivo no catálogo é inválida.")
+        specs.append(ObjectiveSpec(item["id"], direction))
+    return tuple(specs)
+
+
+def _reference_points_payload(run_id: str, problem_type: dict, result) -> dict:
+    catalog = {item["id"]: item for item in problem_type.get("objectives", [])}
+
+    def point(point_id: str, label: str, values: tuple[float, ...]) -> dict:
+        return {
+            "id": point_id,
+            "label": label,
+            "objective_values": {
+                spec.id: values[index] for index, spec in enumerate(result.objectives)
+            },
+        }
+
+    return {
+        "run_id": run_id,
+        "method": result.method,
+        "antiutopian_kind": "nadir",
+        "objectives": [
+            {
+                "id": spec.id,
+                "name": catalog[spec.id].get("name"),
+                "unit": catalog[spec.id].get("unit"),
+                "direction": spec.direction,
+            }
+            for spec in result.objectives
+        ],
+        "utopian": point("utopian", "Solução utópica", result.utopian),
+        "antiutopian": point("antiutopian", "Solução antiutópica", result.nadir),
+        "distance": {
+            "metric": "euclidean",
+            "label": "Distância euclidiana",
+            "space": "objectives",
+            "note": "No espaço dos objetivos, sem normalizar",
+        },
+        "note": (
+            "Estimativa a partir das soluções mapeadas. "
+            "A solução antiutópica é o nadir da fronteira, não o pior ponto da região viável."
+        ),
+        "warnings": [{"code": warning.code, "message": warning.message} for warning in result.warnings],
+    }
 
 
 @runs_blueprint.get("/runs/<run_id>/solutions/<solution_id>")

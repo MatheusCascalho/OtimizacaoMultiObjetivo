@@ -11,7 +11,7 @@ const mockSolutions = [
   { id: '011', cost: 15.1, coverage: 70.5, items: 9, frontier: false },
   { id: '006', cost: 11.4, coverage: 65.8, items: 7, frontier: true },
   { id: '019', cost: 19.3, coverage: 79.4, items: 13, frontier: false },
-  { id: '003', cost: 9.8, coverage: 59.2, items: 6, frontier: true },
+  { id: '003', cost: 9.8, coverage: 96.0, items: 6, frontier: true },
   { id: '022', cost: 22.8, coverage: 84.9, items: 15, frontier: false },
   { id: '016', cost: 17.2, coverage: 75.6, items: 11, frontier: false },
   { id: '027', cost: 27.1, coverage: 93.6, items: 18, frontier: true },
@@ -26,7 +26,7 @@ const mockSolutions = [
   { id: '007', cost: 12.1, coverage: 63.5, items: 7, frontier: false },
   { id: '026', cost: 26.4, coverage: 90.1, items: 16, frontier: false },
   { id: '012', cost: 15.4, coverage: 71.2, items: 9, frontier: false },
-  { id: '033', cost: 33.2, coverage: 97.4, items: 20, frontier: true },
+  { id: '033', cost: 33.2, coverage: 58.0, items: 20, frontier: true },
 ];
 
 const state = {
@@ -47,6 +47,9 @@ const state = {
   notifications: [],
   routeGraph: null,
   routeGraphKey: null,
+  showReferencePoints: true,
+  referencePoints: null,
+  referenceRunId: null,
 };
 
 async function fetchJson(endpoint, options = {}) {
@@ -131,6 +134,21 @@ function initializeLocalSettings() {
       setApiStatus('A preferência vale apenas para esta sessão.', true);
     }
   });
+
+  const referenceToggle = document.querySelector('#toggle-reference-points');
+  if (referenceToggle && window.ReferencePoints) {
+    state.showReferencePoints = ReferencePoints.readShowReferencePoints(window.localStorage);
+    referenceToggle.checked = state.showReferencePoints;
+    referenceToggle.addEventListener('change', () => {
+      state.showReferencePoints = referenceToggle.checked;
+      try {
+        ReferencePoints.writeShowReferencePoints(window.localStorage, state.showReferencePoints);
+      } catch {
+        setApiStatus('A preferência vale apenas para esta sessão.', true);
+      }
+      renderTable();
+    });
+  }
 }
 
 function applyInstanceSummary(instance) {
@@ -222,6 +240,7 @@ async function loadInstances() {
         state.resultIsDemo = false;
         state.solutions = [];
         state.frontiers = [];
+        clearReferencePoints();
         renderSolutionTiming(null);
         renderTable();
       }
@@ -233,6 +252,7 @@ async function loadInstances() {
     state.resultIsDemo = false;
     state.solutions = [];
     state.frontiers = [];
+    clearReferencePoints();
     renderSolutionTiming(null);
     updateInstanceCount();
     document.querySelector('#input-preview').hidden = true;
@@ -247,6 +267,7 @@ async function loadInstances() {
     state.resultIsDemo = true;
     state.solutions = [...mockSolutions];
     state.frontiers = [];
+    clearReferencePoints();
     renderSolutionTiming(null);
     document.querySelector('#input-preview').hidden = true;
     populateInstances();
@@ -413,6 +434,19 @@ function chartFrontierSolutions() {
   return state.solutions;
 }
 
+function clearReferencePoints() {
+  state.referencePoints = null;
+  state.referenceRunId = null;
+}
+
+function displayedReferencePoints() {
+  if (state.referencePoints) return state.referencePoints;
+  if (state.resultIsDemo && state.solutions.length && window.ReferencePoints) {
+    return ReferencePoints.estimateFromChartSolutions(state.solutions);
+  }
+  return null;
+}
+
 async function loadRunResults(runId, offset) {
   const payload = await fetchJson(`/runs/${runId}/results?limit=${state.resultLimit}&offset=${offset}`);
   state.resultOffset = offset;
@@ -424,6 +458,20 @@ async function loadRunResults(runId, offset) {
     round: frontier.round,
     points: (frontier.solutions || []).map((solution) => mapApiSolution(solution, frontier.round)),
   }));
+  if (state.referenceRunId !== runId) {
+    try {
+      state.referencePoints = ReferencePoints.mapApiReferencePoints(
+        await fetchJson(`/runs/${runId}/reference-points`),
+      );
+      state.referenceRunId = state.referencePoints ? runId : null;
+      if (!state.referencePoints) {
+        setApiStatus('A resposta dos pontos de referência não pôde ser lida.', true);
+      }
+    } catch (error) {
+      clearReferencePoints();
+      setApiStatus(`Não foi possível calcular os pontos de referência: ${error.message}`, true);
+    }
+  }
   selectedId = state.solutions[0]?.id || null;
   state.selectedSolutionId = selectedId;
   document.querySelector('#metric-solutions').replaceChildren(
@@ -458,10 +506,13 @@ async function pollRun(runId) {
         if (run.status === 'completed') {
           await loadRunResults(runId, 0);
           await loadNotifications();
-          setApiStatus('Execução concluída. Resultados disponíveis.');
+          if (state.referencePoints) {
+            setApiStatus('Execução concluída. Resultados disponíveis.');
+          }
         } else {
           state.solutions = [];
           state.frontiers = [];
+          clearReferencePoints();
           state.resultIsDemo = false;
           renderSolutionTiming(null);
           renderTable();
@@ -508,6 +559,7 @@ async function startRun() {
     state.activeRun = response;
     state.solutions = [];
     state.frontiers = [];
+    clearReferencePoints();
     state.resultIsDemo = false;
     state.resultTotal = 0;
     document.querySelector('#metric-solutions').replaceChildren(document.createTextNode('--'));
@@ -671,6 +723,7 @@ async function createInstance(event) {
     state.activeRun = null;
     state.solutions = [];
     state.frontiers = [];
+    clearReferencePoints();
     state.resultIsDemo = false;
     renderSolutionTiming(null);
     state.resultOffset = 0;
@@ -934,6 +987,7 @@ let selectedId = '018';
 let activeView = 'frontier';
 let visibleSolutions = [];
 let plottedPoints = [];
+let plottedReferences = [];
 
 function renderTable() {
   const query = searchInput.value.trim().toLowerCase();
@@ -977,6 +1031,7 @@ function renderTable() {
   document.querySelector('#page-indicator').textContent = `${Math.floor(state.tableOffset / state.tablePageSize) + 1} / ${Math.max(1, Math.ceil(visibleSolutions.length / state.tablePageSize))}`;
   document.querySelector('#export-csv').disabled = !state.resultIsDemo && !state.solutions.length;
   drawChart();
+  renderReferenceDistance();
   syncRoutePreview();
 }
 
@@ -999,6 +1054,16 @@ function drawChart() {
     seenScaleIds.add(solution.id);
     scalePoints.push(solution);
   });
+  const referencePoints = state.showReferencePoints ? displayedReferencePoints() : null;
+  if (referencePoints) {
+    scalePoints.push(referencePoints.utopian, referencePoints.antiutopian);
+  }
+  chart.setAttribute(
+    'aria-label',
+    referencePoints
+      ? 'Gráfico da fronteira de Pareto com a solução utópica e a solução antiutópica. Tempo em horas no eixo vertical e distância em quilômetros no eixo horizontal.'
+      : 'Gráfico da fronteira de Pareto. Cada rodada aparece com uma cor própria. Tempo em horas no eixo vertical e distância em quilômetros no eixo horizontal.',
+  );
   const costs = scalePoints.map((solution) => solution.cost);
   const coverages = scalePoints.map((solution) => solution.coverage);
   const minCost = costs.length ? Math.min(...costs) : 0;
@@ -1050,12 +1115,34 @@ function drawChart() {
     y: normalizedY(solution.coverage),
   }));
   renderRoundLegend(series);
+  const utopianKey = document.querySelector('#reference-key-utopian');
+  const antiutopianKey = document.querySelector('#reference-key-antiutopian');
+  if (utopianKey) utopianKey.hidden = !referencePoints;
+  if (antiutopianKey) antiutopianKey.hidden = !referencePoints;
   const colorById = new Map();
   series.forEach((item) => {
     item.points.forEach((point) => colorById.set(point.id, item.color));
   });
 
   plottedPoints = [];
+  plottedReferences = [];
+  if (referencePoints) {
+    const selected = findDisplayedSolution(selectedId);
+    if (selected?.frontier) {
+      const originX = normalizedX(selected.cost);
+      const originY = normalizedY(selected.coverage);
+      [referencePoints.utopian, referencePoints.antiutopian].forEach((anchor) => {
+        chartContext.beginPath();
+        chartContext.moveTo(originX, originY);
+        chartContext.lineTo(normalizedX(anchor.cost), normalizedY(anchor.coverage));
+        chartContext.setLineDash(anchor.id === 'utopian' ? [2, 3] : [6, 4]);
+        chartContext.strokeStyle = '#182b25';
+        chartContext.lineWidth = 1;
+        chartContext.stroke();
+      });
+      chartContext.setLineDash([]);
+    }
+  }
   const frontierPoints = series.flatMap((item) => item.points);
   const pointsToDraw = activeView === 'all'
     ? frontierPoints.concat(state.solutions.filter((solution) => !solution.frontier && !frontierPoints.some((point) => point.id === solution.id)))
@@ -1089,6 +1176,99 @@ function drawChart() {
       chartContext.stroke();
     }
   });
+  if (!referencePoints) return;
+  const anchors = [referencePoints.antiutopian, referencePoints.utopian];
+  const anchorPositions = anchors.map((anchor) => ({
+    anchor,
+    x: normalizedX(anchor.cost),
+    y: normalizedY(anchor.coverage),
+  }));
+  const stacked = Math.hypot(
+    anchorPositions[0].x - anchorPositions[1].x,
+    anchorPositions[0].y - anchorPositions[1].y,
+  ) < 14;
+  anchorPositions.forEach((item) => {
+    plottedReferences.push({ kind: 'reference', point: item.anchor, x: item.x, y: item.y });
+    drawReferenceMarker(item.anchor, item.x, item.y);
+    const labelY = stacked ? item.y + (item.anchor.id === 'utopian' ? -14 : 14) : item.y;
+    drawReferenceLabel(item.anchor.label, item.x, labelY, item.anchor.id === 'utopian' && !stacked, width, height, inset);
+  });
+}
+
+function drawReferenceMarker(anchor, px, py) {
+  chartContext.lineWidth = 1.6;
+  chartContext.strokeStyle = '#182b25';
+  chartContext.setLineDash([]);
+  if (anchor.id === 'utopian') {
+    chartContext.beginPath();
+    chartContext.moveTo(px, py - 7);
+    chartContext.lineTo(px + 7, py);
+    chartContext.lineTo(px, py + 7);
+    chartContext.lineTo(px - 7, py);
+    chartContext.closePath();
+    chartContext.fillStyle = '#fffefa';
+    chartContext.fill();
+    chartContext.stroke();
+    return;
+  }
+  chartContext.fillStyle = '#e5b94f';
+  chartContext.fillRect(px - 6, py - 6, 12, 12);
+  chartContext.strokeRect(px - 6, py - 6, 12, 12);
+  chartContext.beginPath();
+  chartContext.moveTo(px - 4, py - 4);
+  chartContext.lineTo(px + 4, py + 4);
+  chartContext.moveTo(px + 4, py - 4);
+  chartContext.lineTo(px - 4, py + 4);
+  chartContext.stroke();
+}
+
+function drawReferenceLabel(text, px, py, preferRight, width, height, inset) {
+  chartContext.font = '9px "IBM Plex Mono", monospace';
+  const measured = chartContext.measureText(text).width;
+  let align = preferRight ? 'left' : 'right';
+  let x = preferRight ? px + 12 : px - 12;
+  if (preferRight && x + measured > width - 6) {
+    align = 'right';
+    x = px - 12;
+  } else if (!preferRight && x - measured < inset.left) {
+    align = 'left';
+    x = px + 12;
+  }
+  let y = py;
+  if (y < inset.top + 8) y = Math.min(height - 8, py + 16);
+  if (y > height - 8) y = Math.max(inset.top + 8, py - 16);
+  chartContext.textAlign = align;
+  chartContext.textBaseline = 'middle';
+  chartContext.lineWidth = 3;
+  chartContext.strokeStyle = '#fffefa';
+  chartContext.strokeText(text, x, y);
+  chartContext.fillStyle = '#182b25';
+  chartContext.fillText(text, x, y);
+}
+
+function renderReferenceDistance() {
+  const panel = document.querySelector('#reference-distance');
+  if (!panel || !window.ReferencePoints) return;
+  const points = state.showReferencePoints ? displayedReferencePoints() : null;
+  if (!points) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  document.querySelector('#reference-distance-heading').textContent = points.distanceLabel;
+  const measurement = ReferencePoints.measureReferenceDistances(findDisplayedSolution(selectedId), points);
+  const values = document.querySelector('#reference-distance-values');
+  const note = document.querySelector('#reference-distance-note');
+  if (!measurement.eligible) {
+    values.hidden = true;
+    note.textContent = 'Selecione uma solução da fronteira para medir a distância.';
+    return;
+  }
+  values.hidden = false;
+  document.querySelector('#distance-utopian').textContent = ReferencePoints.formatObjectiveDistance(measurement.toUtopian);
+  document.querySelector('#distance-antiutopian').textContent = ReferencePoints.formatObjectiveDistance(measurement.toAntiutopian);
+  const warning = (points.warnings || []).map((item) => item.message).filter(Boolean).join(' ');
+  note.textContent = [points.distanceNote, points.note, warning].filter(Boolean).join(' ');
 }
 
 function renderRoundLegend(series) {
@@ -1154,24 +1334,42 @@ tableBody.addEventListener('keydown', (event) => {
 
 document.querySelectorAll('.segment').forEach((button) => button.addEventListener('click', () => setView(button.dataset.view)));
 
+function nearestChartPoint(pointer, points, limit) {
+  return points.reduce((best, point) => {
+    const distance = Math.hypot(point.x - pointer.x, point.y - pointer.y);
+    return distance < best.distance ? { point, distance } : best;
+  }, { point: null, distance: limit });
+}
+
+function chartHit(pointer) {
+  const solutionHit = nearestChartPoint(pointer, plottedPoints, 18);
+  const referenceHit = nearestChartPoint(pointer, plottedReferences, 16);
+  if (referenceHit.point && (!solutionHit.point || referenceHit.distance <= solutionHit.distance)) {
+    return referenceHit.point;
+  }
+  return solutionHit.point;
+}
+
 chart.addEventListener('pointermove', (event) => {
   const rect = chart.getBoundingClientRect();
   const pointer = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-  const nearest = plottedPoints.reduce((best, point) => {
-    const distance = Math.hypot(point.x - pointer.x, point.y - pointer.y);
-    return distance < best.distance ? { point, distance } : best;
-  }, { point: null, distance: 18 });
+  const hit = chartHit(pointer);
 
-  if (!nearest.point) {
+  if (!hit) {
     tooltip.hidden = true;
     return;
   }
 
-  const { solution } = nearest.point;
-  const roundLine = solution.round ? `<span>Rodada ${solution.round}</span>` : '';
-  tooltip.innerHTML = `<strong>SOL-${solution.id}</strong><span>Distância: ${solution.cost.toFixed(2)} km</span><span>Tempo: ${solution.coverage.toFixed(2)} h</span>${roundLine}`;
+  if (hit.kind === 'reference') {
+    const { point } = hit;
+    tooltip.innerHTML = `<strong>${point.label}</strong><span>Distância: ${point.cost.toFixed(2)} km</span><span>Tempo: ${point.coverage.toFixed(2)} h</span>`;
+  } else {
+    const { solution } = hit;
+    const roundLine = solution.round ? `<span>Rodada ${solution.round}</span>` : '';
+    tooltip.innerHTML = `<strong>SOL-${solution.id}</strong><span>Distância: ${solution.cost.toFixed(2)} km</span><span>Tempo: ${solution.coverage.toFixed(2)} h</span>${roundLine}`;
+  }
   tooltip.hidden = false;
-  tooltip.style.left = `${Math.min(pointer.x + 12, rect.width - 132)}px`;
+  tooltip.style.left = `${Math.min(pointer.x + 12, rect.width - 168)}px`;
   tooltip.style.top = `${Math.max(3, pointer.y - 47)}px`;
 });
 
@@ -1179,11 +1377,8 @@ chart.addEventListener('pointerleave', () => { tooltip.hidden = true; });
 chart.addEventListener('click', (event) => {
   const rect = chart.getBoundingClientRect();
   const pointer = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-  const nearest = plottedPoints.reduce((best, point) => {
-    const distance = Math.hypot(point.x - pointer.x, point.y - pointer.y);
-    return distance < best.distance ? { point, distance } : best;
-  }, { point: null, distance: 18 });
-  if (nearest.point) selectSolution(nearest.point.solution.id);
+  const hit = chartHit(pointer);
+  if (hit && hit.kind !== 'reference') selectSolution(hit.solution.id);
 });
 
 document.querySelector('#export-csv').addEventListener('click', () => {
@@ -1315,6 +1510,7 @@ document.querySelector('#instance-selector').addEventListener('change', async (e
     } else {
       state.solutions = [];
       state.frontiers = [];
+      clearReferencePoints();
       state.resultIsDemo = false;
       renderSolutionTiming(null);
       renderTable();

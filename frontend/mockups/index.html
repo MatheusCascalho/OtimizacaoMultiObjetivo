@@ -11,6 +11,7 @@
     <link rel="stylesheet" href="styles.css">
     <script src="frontier_series.js" defer></script>
     <script src="solution_timing.js" defer></script>
+    <script src="reference_points.js" defer></script>
     <script src="app.js" defer></script>
   </head>
   <body>
@@ -100,6 +101,7 @@
                   <div class="chart-controls"><div class="segmented-control" role="tablist" aria-label="Visualização do gráfico"><button class="segment active" id="tab-frontier" type="button" role="tab" aria-selected="true" data-view="frontier">Fronteira</button><button class="segment" id="tab-all" type="button" role="tab" aria-selected="false" data-view="all">Todas</button></div><button class="icon-button chart-menu" type="button" aria-label="Opções do gráfico" title="Opções do gráfico">···</button></div>
                 </div>
                 <div class="chart-legend"><span><i class="legend-dot coral-dot"></i>Distância <b>minimizar · km</b></span><span><i class="legend-dot blue-dot"></i>Tempo <b>minimizar · h</b></span><span class="demo-tag" id="data-mode-tag">DADOS ILUSTRATIVOS</span></div>
+                <div class="reference-controls"><label class="reference-toggle"><input id="toggle-reference-points" type="checkbox" checked>Mostrar solução utópica e solução antiutópica</label></div>
                 <div class="chart-wrap">
                   <div class="y-axis-title">Tempo (h) <span>↑</span></div>
                   <div class="chart-stage">
@@ -108,7 +110,7 @@
                   </div>
                   <div class="x-axis-title">Distância (km) <span>→</span></div>
                 </div>
-                <div class="chart-footnote"><span id="frontier-round-legend" class="frontier-round-legend" hidden aria-label="Rodadas da fronteira de Pareto"></span><span id="single-frontier-key"><span class="key-dot frontier-key"></span>Não dominadas</span><span><span class="key-dot dominated-key"></span>Dominadas</span><span class="chart-footnote-right">Clique em um ponto para selecionar</span></div>
+                <div class="chart-footnote"><span id="frontier-round-legend" class="frontier-round-legend" hidden aria-label="Rodadas da fronteira de Pareto"></span><span id="single-frontier-key"><span class="key-dot frontier-key"></span>Não dominadas</span><span><span class="key-dot dominated-key"></span>Dominadas</span><span id="reference-key-utopian" hidden><span class="key-diamond" aria-hidden="true"></span>Solução utópica</span><span id="reference-key-antiutopian" hidden><span class="key-square" aria-hidden="true"></span>Solução antiutópica</span><span class="chart-footnote-right">Clique em um ponto para selecionar</span></div>
               </section>
 
               <section class="solutions-panel panel">
@@ -126,6 +128,7 @@
                 <div class="panel-heading selected-heading"><div><p class="section-kicker">ALTERNATIVA EM FOCO</p><h2 id="selected-title">Nenhuma selecionada</h2></div></div>
                 <div class="selected-chart"><canvas id="route-chart" role="img" aria-label="Gráfico da rota selecionada; selecione Ver rota para carregar os dados"></canvas></div>
                 <div class="detail-metrics"><div class="detail-metric"><span><i class="legend-dot coral-dot"></i>Distância</span><strong id="selected-cost">-- km</strong></div><div class="detail-metric"><span><i class="legend-dot blue-dot"></i>Tempo</span><strong id="selected-coverage">-- h</strong></div><div class="detail-metric"><span>Cidades na rota</span><strong id="selected-items">--</strong></div></div>
+                <div class="reference-distance" id="reference-distance" role="group" aria-labelledby="reference-distance-heading" aria-live="polite" hidden><p class="metric-label" id="reference-distance-heading">Distância euclidiana</p><div id="reference-distance-values"><div class="detail-metric"><span>Até a solução utópica</span><strong id="distance-utopian">--</strong></div><div class="detail-metric"><span>Até a solução antiutópica</span><strong id="distance-antiutopian">--</strong></div></div><p class="reference-distance-note" id="reference-distance-note"></p></div>
                 <button class="button button-primary compare-button" id="view-route" type="button" disabled><span aria-hidden="true">⌖</span> Ver rota</button>
                 <button class="button button-light compare-button" id="expand-route" type="button" disabled aria-haspopup="dialog" aria-controls="route-dialog">Expandir grafo</button>
                 <button class="button button-light compare-button route-download" id="download-route" type="button" disabled><span aria-hidden="true">↓</span> Baixar rota CSV</button>
