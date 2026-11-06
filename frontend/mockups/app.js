@@ -389,7 +389,10 @@ function setTimingValue(selector, value, note) {
 }
 
 function renderSolutionTiming(timing) {
-  const view = window.SolutionTiming.solutionTimingView(timing);
+  const api = window.SolutionTiming;
+  const view = api && typeof api.solutionTimingViewOrEmpty === 'function'
+    ? api.solutionTimingViewOrEmpty(api, timing)
+    : null;
   if (!view) {
     setTimingValue('#timing-mean', '--');
     setTimingValue('#timing-stdev', '--');

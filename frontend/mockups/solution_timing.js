@@ -19,6 +19,11 @@
     return `Rodada ${sample.round} · tentativa ${sample.attempt}`;
   }
 
+  function solutionTimingViewOrEmpty(api, timing) {
+    if (!api || typeof api.solutionTimingView !== 'function') return null;
+    return api.solutionTimingView(timing);
+  }
+
   function solutionTimingView(timing) {
     if (!timing || !Number.isFinite(timing.mean_ms) || !Number.isFinite(timing.sample_stdev_ms)) return null;
     return {
@@ -31,5 +36,5 @@
     };
   }
 
-  return { formatSolutionDuration, formatAttemptIdentity, solutionTimingView };
+  return { formatSolutionDuration, formatAttemptIdentity, solutionTimingView, solutionTimingViewOrEmpty };
 });
