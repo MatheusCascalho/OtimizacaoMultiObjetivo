@@ -13,6 +13,7 @@
     <script src="solution_timing.js" defer></script>
     <script src="reference_points.js" defer></script>
     <script src="hypervolume.js" defer></script>
+    <script src="quality_evolution.js" defer></script>
     <script src="round_filter.js" defer></script>
     <script src="app.js" defer></script>
   </head>
@@ -99,7 +100,7 @@
             <div class="metric"><span class="metric-label" id="spread-stdev-label">Desvio padrão do espalhamento Δ</span><div class="metric-value" id="spread-stdev" aria-labelledby="spread-stdev-label">--</div></div>
             <div class="metric"><span class="metric-label" id="spread-cv-label">Coeficiente de variação do espalhamento Δ</span><div class="metric-value" id="spread-cv" aria-labelledby="spread-cv-label">--</div></div>
           </section>
-          <p id="hypervolume-note" class="map-mode-status" hidden>O hipervolume é a área adimensional de 0 no utópico a 1 no nadir, com referência em 1,05. O espalhamento Δ usa o mesmo espaço; 0 indica distribuição uniforme.</p>
+          <p id="hypervolume-note" class="map-mode-status" hidden>O hipervolume é a área adimensional de 0 no utópico a 1 no nadir, com referência em 1,1 vezes o nadir. O espalhamento Δ usa o mesmo espaço; 0 indica distribuição uniforme.</p>
           <div class="quality-table-scroll" id="quality-rounds-wrap" hidden>
             <table id="quality-rounds" class="quality-table">
               <caption class="sr-only">Qualidade por rodada</caption>
@@ -116,6 +117,34 @@
             </table>
           </div>
 
+          <section class="quality-evolution" id="quality-evolution" aria-label="Evolução dos indicadores de qualidade" hidden>
+            <p id="quality-evolution-note" class="map-mode-status quality-evolution-note">Média do indicador entre execuções com várias rodadas, usando o utópico e o nadir da execução inteira.</p>
+            <article class="quality-evolution-figure panel">
+              <h3 id="hv-evolution-title">Evolução do hipervolume</h3>
+              <div class="quality-evolution-plot" id="hv-evolution-plot">
+                <div class="y-axis-title" id="hv-evolution-y">Média do hipervolume</div>
+                <div class="quality-evolution-stage">
+                  <canvas id="hv-evolution-chart" role="img" aria-label="Evolução do hipervolume"></canvas>
+                </div>
+                <div class="x-axis-title" id="hv-evolution-x">Iterações</div>
+              </div>
+              <p id="hv-evolution-empty" class="quality-evolution-empty" hidden>Nenhuma execução não exata concluída para esta instância.</p>
+              <ul id="hv-evolution-legend" class="quality-evolution-legend" aria-label="Curvas da evolução do hipervolume"></ul>
+            </article>
+            <article class="quality-evolution-figure panel">
+              <h3 id="spread-evolution-title">Evolução do espalhamento Δ</h3>
+              <div class="quality-evolution-plot" id="spread-evolution-plot">
+                <div class="y-axis-title" id="spread-evolution-y">Média do espalhamento Δ</div>
+                <div class="quality-evolution-stage">
+                  <canvas id="spread-evolution-chart" role="img" aria-label="Evolução do espalhamento Δ"></canvas>
+                </div>
+                <div class="x-axis-title" id="spread-evolution-x">Iterações</div>
+              </div>
+              <p id="spread-evolution-empty" class="quality-evolution-empty" hidden>Nenhuma execução não exata concluída para esta instância.</p>
+              <ul id="spread-evolution-legend" class="quality-evolution-legend" aria-label="Curvas da evolução do espalhamento Δ"></ul>
+            </article>
+          </section>
+
           <section class="input-preview panel" id="input-preview" aria-labelledby="input-preview-title" hidden>
             <div class="panel-heading preview-heading"><div><p class="section-kicker">INSPEÇÃO DOS DADOS</p><h2 id="input-preview-title">Análise prévia</h2></div><div class="segmented-control" role="group" aria-label="Objetivo da análise prévia"><button class="segment active" type="button" data-objective="time">Tempo</button><button class="segment" type="button" data-objective="distance">Distância</button></div></div>
             <div class="preview-content"><div class="preview-graph"><div class="preview-graph-heading"><p class="metric-label">GRAFO · <span id="preview-objective-label">TEMPO</span></p><label class="neighbor-control" for="neighbors-per-city">Vizinhos/cidade <input id="neighbors-per-city" type="number" min="1" value="20" step="1"></label><span class="metric-label" id="preview-neighbor-count"></span></div><canvas id="input-graph" role="img" aria-label="Grafo da instância"></canvas></div><div class="preview-matrix"><p class="metric-label">MATRIZ · <span id="matrix-objective-label">TEMPO</span> <span id="matrix-size"></span> <span id="matrix-scale"></span></p><div class="matrix-scroll"><table id="matrix-table" class="matrix-table"></table></div></div></div>
@@ -129,7 +158,7 @@
                   <div class="chart-controls"><div class="segmented-control" role="tablist" aria-label="Visualização do gráfico"><button class="segment active" id="tab-frontier" type="button" role="tab" aria-selected="true" data-view="frontier">Fronteira</button><button class="segment" id="tab-all" type="button" role="tab" aria-selected="false" data-view="all">Todas</button></div><button class="button button-light" id="toggle-chart-expand" type="button" aria-pressed="false">Ampliar mapa</button><button class="icon-button chart-menu" type="button" aria-label="Opções do gráfico" title="Opções do gráfico">···</button></div>
                 </div>
                 <div class="chart-legend"><span><i class="legend-dot coral-dot"></i>Distância <b>minimizar · km</b></span><span><i class="legend-dot blue-dot"></i>Tempo <b>minimizar · h</b></span><span class="demo-tag" id="data-mode-tag">DADOS ILUSTRATIVOS</span></div>
-                <div class="reference-controls" role="group" aria-label="Controles do mapa de decisão"><label class="reference-toggle"><input id="toggle-reference-points" type="checkbox" checked>Mostrar solução utópica e solução antiutópica</label><label class="reference-toggle"><input id="toggle-normalized-scale" type="checkbox">Escalarizar pelo utópico e pelo nadir</label><label class="reference-toggle"><input id="toggle-dominance-cone" type="checkbox" aria-describedby="cone-status">Exibir cone de dominância</label><label class="reference-toggle"><input id="toggle-approximate-frontier" type="checkbox">Exibir fronteira aproximada</label><label class="reference-toggle"><input id="toggle-hypervolume" type="checkbox" aria-describedby="hypervolume-status">Exibir hipervolume das rodadas</label></div>
+                <div class="reference-controls" role="group" aria-label="Controles do mapa de decisão"><label class="reference-toggle"><input id="toggle-reference-points" type="checkbox" checked>Mostrar solução utópica e solução antiutópica</label><label class="reference-toggle"><input id="toggle-normalized-scale" type="checkbox">Escalarizar pelo utópico e pelo nadir</label><label class="reference-toggle"><input id="toggle-dominance-cone" type="checkbox" aria-describedby="cone-status">Exibir cone de dominância</label><label class="reference-toggle"><input id="toggle-approximate-frontier" type="checkbox">Exibir fronteira aproximada</label><label class="reference-toggle"><input id="toggle-hypervolume" type="checkbox" aria-describedby="hypervolume-status">Exibir hipervolume das rodadas</label><label class="reference-toggle"><input id="toggle-hypervolume-reference" type="checkbox">Exibir referência do hipervolume</label></div>
                 <div class="round-filters" id="round-filters" role="group" aria-label="Filtrar rodadas do mapa" hidden><button class="button button-light" id="show-all-rounds" type="button">Todas</button><div id="round-filter-options"></div></div>
                 <p id="scale-status" class="map-mode-status" hidden>Os pontos de referência ainda não estão disponíveis para escalarizar o mapa.</p>
                 <p id="cone-status" class="map-mode-status" hidden>Selecione uma solução para exibir o cone de dominância.</p>
@@ -142,7 +171,7 @@
                   </div>
                   <div class="x-axis-title" id="x-axis-title">Distância (km) <span>→</span></div>
                 </div>
-                <div class="chart-footnote"><span id="frontier-round-legend" class="frontier-round-legend" hidden aria-label="Rodadas da fronteira de Pareto"></span><span id="single-frontier-key"><span class="key-dot frontier-key"></span>Não dominadas</span><span id="dominated-key"><span class="key-dot dominated-key"></span>Dominadas</span><span id="reference-key-utopian" hidden><span class="key-diamond" aria-hidden="true"></span>Solução utópica</span><span id="reference-key-antiutopian" hidden><span class="key-square" aria-hidden="true"></span>Solução antiutópica</span><span id="cone-key" hidden><span class="key-hatch" aria-hidden="true"></span>Cone de dominância</span><span id="approximate-frontier-key" hidden>Fronteira aproximada da união</span><span id="scale-key" hidden>0% no utópico, 100% no nadir</span><span id="hypervolume-key" hidden><span class="key-hatch" aria-hidden="true"></span>Área do hipervolume da rodada</span><span class="chart-footnote-right">Clique em um ponto para selecionar</span></div>
+                <div class="chart-footnote"><span id="frontier-round-legend" class="frontier-round-legend" hidden aria-label="Rodadas da fronteira de Pareto"></span><span id="single-frontier-key"><span class="key-dot frontier-key"></span>Não dominadas</span><span id="dominated-key"><span class="key-dot dominated-key"></span>Dominadas</span><span id="reference-key-utopian" hidden><span class="key-diamond" aria-hidden="true"></span>Solução utópica</span><span id="reference-key-antiutopian" hidden><span class="key-square" aria-hidden="true"></span>Solução antiutópica</span><span id="cone-key" hidden><span class="key-hatch" aria-hidden="true"></span>Cone de dominância</span><span id="approximate-frontier-key" hidden>Fronteira aproximada da união</span><span id="scale-key" hidden>0% no utópico, 100% no nadir</span><span id="hypervolume-key" hidden><span class="key-hatch" aria-hidden="true"></span>Área do hipervolume da rodada</span><span id="hypervolume-reference-key" hidden><span class="key-reference" aria-hidden="true"></span>Referência do hipervolume</span><span class="chart-footnote-right">Clique em um ponto para selecionar</span></div>
               </section>
 
               <section class="solutions-panel panel">

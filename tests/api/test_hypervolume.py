@@ -96,15 +96,15 @@ def test_hypervolume_reports_each_round_and_the_sample_aggregates(app: Flask) ->
     assert body["space"] == "normalized_objectives"
     assert body["unit"] is None
     assert body["standard_deviation"] == "sample"
-    assert body["reference_shift"] == 0.05
+    assert body["reference_shift"] == 1.1
     assert body["nadir"] == {"time": 4.0, "distance": 4.0}
-    assert body["reference_point"] == pytest.approx({"time": 1.05, "distance": 1.05})
+    assert body["reference_point"] == pytest.approx({"time": 1.1, "distance": 1.1})
     assert body["rounds"][0]["round"] == 1
     assert body["rounds"][0]["candidate_count"] == 2
-    assert body["rounds"][0]["hypervolume"] == pytest.approx(0.1025)
+    assert body["rounds"][0]["hypervolume"] == pytest.approx(0.21)
     assert body["rounds"][1]["candidate_count"] == 2
-    assert body["rounds"][1]["hypervolume"] == pytest.approx(0.39)
-    assert body["mean_hypervolume"] == pytest.approx(0.24625)
+    assert body["rounds"][1]["hypervolume"] == pytest.approx(0.4725)
+    assert body["mean_hypervolume"] == pytest.approx(0.34125)
     assert body["coefficient_of_variation"] == pytest.approx(
         body["sample_stdev_hypervolume"] / body["mean_hypervolume"]
     )
@@ -116,7 +116,7 @@ def test_hypervolume_reports_each_round_and_the_sample_aggregates(app: Flask) ->
     assert body["spread_coefficient_of_variation"] == pytest.approx(
         body["sample_stdev_spread"] / body["mean_spread"]
     )
-    assert "1,05" in body["note"]
+    assert "1,1" in body["note"]
     assert "utópico" in body["note"]
     assert "Δ = 0" in body["spread_note"]
 
@@ -138,7 +138,7 @@ def test_hypervolume_coefficient_is_zero_for_a_single_round(app: Flask) -> None:
     assert response.status_code == 200
     body = response.json
     assert body["sample_stdev_hypervolume"] == 0.0
-    assert body["mean_hypervolume"] == pytest.approx(0.1025)
+    assert body["mean_hypervolume"] == pytest.approx(0.21)
     assert body["coefficient_of_variation"] == 0.0
     assert body["mean_spread"] == pytest.approx(0.0)
     assert body["sample_stdev_spread"] == 0.0

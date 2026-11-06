@@ -29,20 +29,20 @@ def test_reference_point_is_applied_after_normalization() -> None:
     summary = summarize_run_hypervolume(samples, MIN_F1_F2)
 
     assert summary.nadir == (4.0, 4.0)
-    assert summary.reference_point == pytest.approx((1.05, 1.05))
-    assert summary.reference_shift == 0.05
-    assert shift_reference_point((1.0, 1.0)) == pytest.approx((1.05, 1.05))
+    assert summary.reference_point == pytest.approx((1.1, 1.1))
+    assert summary.reference_shift == 1.1
+    assert shift_reference_point((1.0, 1.0)) == pytest.approx((1.1, 1.1))
     assert summary.rounds[0].round_index == 1
     assert summary.rounds[0].candidate_count == 2
-    assert summary.rounds[0].hypervolume == pytest.approx(0.1025)
+    assert summary.rounds[0].hypervolume == pytest.approx(0.21)
     assert summary.rounds[1].candidate_count == 2
-    assert summary.rounds[1].hypervolume == pytest.approx(0.39)
+    assert summary.rounds[1].hypervolume == pytest.approx(0.4725)
 
 
 def test_hypervolume_rectangles_match_the_normalized_definition() -> None:
-    area = hypervolume_2d([(0.0, 1.0), (1.0, 0.0)], (1.05, 1.05))
-    assert area == pytest.approx((1.0 - 0.0) * (1.05 - 1.0) + (1.05 - 1.0) * (1.05 - 0.0))
-    assert area == pytest.approx(0.1025)
+    area = hypervolume_2d([(0.0, 1.0), (1.0, 0.0)], (1.1, 1.1))
+    assert area == pytest.approx((1.0 - 0.0) * (1.1 - 1.0) + (1.1 - 1.0) * (1.1 - 0.0))
+    assert area == pytest.approx(0.21)
 
 
 def test_normalized_hypervolume_ignores_absolute_objective_scales() -> None:
@@ -65,10 +65,10 @@ def test_normalized_hypervolume_ignores_absolute_objective_scales() -> None:
         MIN_F1_F2,
     )
 
-    assert stretched.reference_point == pytest.approx((1.05, 1.05))
+    assert stretched.reference_point == pytest.approx((1.1, 1.1))
     assert stretched.rounds[0].hypervolume == pytest.approx(compact.rounds[0].hypervolume)
     assert stretched.rounds[1].hypervolume == pytest.approx(compact.rounds[1].hypervolume)
-    assert stretched.rounds[0].hypervolume == pytest.approx(0.1025)
+    assert stretched.rounds[0].hypervolume == pytest.approx(0.21)
 
 
 def test_aggregates_use_the_sample_standard_deviation() -> None:
@@ -82,14 +82,14 @@ def test_aggregates_use_the_sample_standard_deviation() -> None:
         MIN_F1_F2,
     )
 
-    assert summary.mean_hypervolume == pytest.approx((0.1025 + 0.39) / 2)
-    assert summary.sample_stdev_hypervolume == pytest.approx(math.sqrt(((0.1025 - 0.24625) ** 2) * 2))
+    assert summary.mean_hypervolume == pytest.approx((0.21 + 0.4725) / 2)
+    assert summary.sample_stdev_hypervolume == pytest.approx(math.sqrt(((0.21 - 0.34125) ** 2) * 2))
     assert summary.coefficient_of_variation == pytest.approx(
         summary.sample_stdev_hypervolume / summary.mean_hypervolume
     )
     assert summary.mean_candidate_count == pytest.approx(2)
-    assert summary.rounds[0].distance_to_mean == pytest.approx(0.1025 - 0.24625)
-    assert summary.rounds[1].distance_to_mean == pytest.approx(0.39 - 0.24625)
+    assert summary.rounds[0].distance_to_mean == pytest.approx(0.21 - 0.34125)
+    assert summary.rounds[1].distance_to_mean == pytest.approx(0.4725 - 0.34125)
 
 
 def test_a_single_round_has_sample_standard_deviation_zero() -> None:
@@ -130,13 +130,13 @@ def test_maximization_shifts_toward_the_worse_side_and_keeps_the_area() -> None:
     )
 
     assert summary.nadir == pytest.approx((1.0, 1.0))
-    assert summary.reference_point == pytest.approx((1.05, 1.05))
-    assert summary.rounds[0].hypervolume == pytest.approx(0.1025)
+    assert summary.reference_point == pytest.approx((1.1, 1.1))
+    assert summary.rounds[0].hypervolume == pytest.approx(0.21)
     assert summary.rounds[0].candidate_count == 2
 
 
 def test_a_null_range_keeps_the_normalized_reference_at_zero() -> None:
-    assert shift_reference_point((0.0, 1.0)) == pytest.approx((0.0, 1.05))
+    assert shift_reference_point((0.0, 1.0)) == pytest.approx((0.0, 1.1))
     summary = summarize_run_hypervolume(
         ({"round": 1, "f1": 2.0, "f2": 3.0},),
         MIN_F1_F2,

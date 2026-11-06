@@ -52,12 +52,15 @@ const state = {
   showDominanceCone: false,
   showApproximateFrontier: false,
   showHypervolume: false,
+  showHypervolumeReference: false,
   chartExpanded: false,
   hiddenRounds: new Set(),
   referencePoints: null,
   hypervolume: null,
   hypervolumeRunId: null,
   referenceRunId: null,
+  qualityEvolution: null,
+  qualityEvolutionError: '',
 };
 
 async function fetchJson(endpoint, options = {}) {
@@ -194,6 +197,21 @@ function initializeLocalSettings() {
     });
   }
 
+  const hypervolumeReferenceToggle = document.querySelector('#toggle-hypervolume-reference');
+  if (hypervolumeReferenceToggle && window.Hypervolume) {
+    state.showHypervolumeReference = Hypervolume.readShowHypervolumeReference(window.localStorage);
+    hypervolumeReferenceToggle.checked = state.showHypervolumeReference;
+    hypervolumeReferenceToggle.addEventListener('change', () => {
+      state.showHypervolumeReference = hypervolumeReferenceToggle.checked;
+      try {
+        Hypervolume.writeShowHypervolumeReference(window.localStorage, state.showHypervolumeReference);
+      } catch {
+        setApiStatus('A preferência vale apenas para esta sessão.', true);
+      }
+      renderTable();
+    });
+  }
+
   const expandButton = document.querySelector('#toggle-chart-expand');
   if (expandButton && window.Hypervolume) {
     const applyExpansion = () => {
@@ -311,6 +329,7 @@ async function loadInstances() {
         state.frontiers = [];
         clearReferencePoints();
         renderSolutionTiming(null);
+        await loadQualityEvolution(state.selectedInstanceId);
         renderTable();
       }
       return true;
@@ -322,6 +341,7 @@ async function loadInstances() {
     state.solutions = [];
     state.frontiers = [];
     clearReferencePoints();
+    resetQualityEvolution();
     renderSolutionTiming(null);
     updateInstanceCount();
     document.querySelector('#input-preview').hidden = true;
@@ -337,6 +357,7 @@ async function loadInstances() {
     state.solutions = [...mockSolutions];
     state.frontiers = [];
     clearReferencePoints();
+    resetQualityEvolution();
     renderSolutionTiming(null);
     document.querySelector('#input-preview').hidden = true;
     populateInstances();
@@ -645,6 +666,9 @@ async function loadRunResults(runId, offset) {
     Object.assign(document.createElement('span'), { className: 'metric-note', textContent: 'não dominadas' }),
   );
   renderSolutionTiming(payload.solution_timing);
+  if (offset === 0 && state.selectedInstanceId) {
+    await loadQualityEvolution(state.selectedInstanceId);
+  }
   if (state.solutions.length) selectSolution(selectedId);
   else renderTable();
 }
@@ -1201,6 +1225,7 @@ function renderTable() {
   drawChart();
   renderReferenceDistance();
   renderHypervolume();
+  renderQualityEvolution();
   renderMapModeStatus();
   syncRoutePreview();
 }
@@ -1236,7 +1261,7 @@ function drawChart() {
   });
   if (referencePoints) scalePoints.push(referencePoints.utopian, referencePoints.antiutopian);
   if (selectedVisible) scalePoints.push(selectedVisible);
-  const chartReference = state.showHypervolume && window.Hypervolume
+  const chartReference = (state.showHypervolume || state.showHypervolumeReference) && window.Hypervolume
     ? Hypervolume.objectiveReferencePoint(displayedReferencePoints())
     : null;
   if (chartReference && Number.isFinite(chartReference.cost) && Number.isFinite(chartReference.coverage)) {
@@ -1278,6 +1303,7 @@ function drawChart() {
       state.showDominanceCone ? 'O cone de dominância sombreia a região pior ou igual à solução selecionada.' : '',
       approximate ? 'A fronteira aproximada da união está em destaque e as soluções dominadas continuam visíveis.' : '',
       state.showHypervolume ? 'A área do hipervolume de cada rodada está anotada no mapa.' : '',
+      state.showHypervolumeReference ? 'A referência do hipervolume está marcada com um círculo e uma cruz.' : '',
     ].filter(Boolean).join(' '),
   );
 
@@ -1343,6 +1369,14 @@ function drawChart() {
   if (coneKey) coneKey.hidden = !(state.showDominanceCone && selectedVisible);
   const hypervolumeKey = document.querySelector('#hypervolume-key');
   if (hypervolumeKey) hypervolumeKey.hidden = !state.showHypervolume || !hypervolumeLabels.length;
+  const hypervolumeReferenceKey = document.querySelector('#hypervolume-reference-key');
+  const referenceMarkerVisible = Boolean(
+    state.showHypervolumeReference
+    && chartReference
+    && Number.isFinite(chartReference.cost)
+    && Number.isFinite(chartReference.coverage),
+  );
+  if (hypervolumeReferenceKey) hypervolumeReferenceKey.hidden = !referenceMarkerVisible;
   const utopianKey = document.querySelector('#reference-key-utopian');
   const antiutopianKey = document.querySelector('#reference-key-antiutopian');
   if (utopianKey) utopianKey.hidden = !referencePoints;
@@ -1418,6 +1452,17 @@ function drawChart() {
   hypervolumeLabels.forEach((label) => {
     drawReferenceLabel(label.text, label.x, label.y, true, width, height, inset);
   });
+  if (referenceMarkerVisible) {
+    const referencePosition = place(chartReference);
+    plottedReferences.push({
+      kind: 'hypervolume-reference',
+      point: { id: 'hypervolume-reference', label: Hypervolume.REFERENCE_LABEL, ...chartReference },
+      x: referencePosition.x,
+      y: referencePosition.y,
+    });
+    drawHypervolumeReferenceMarker(referencePosition.x, referencePosition.y);
+    drawReferenceLabel(Hypervolume.REFERENCE_LABEL, referencePosition.x, referencePosition.y, false, width, height, inset);
+  }
   if (!referencePoints) return;
   const anchors = [referencePoints.antiutopian, referencePoints.utopian];
   const anchorPositions = anchors.map((anchor) => ({ anchor, ...place(anchor) }));
@@ -1641,6 +1686,113 @@ function qualityCell(value) {
   const cell = document.createElement('td');
   cell.textContent = value;
   return cell;
+}
+
+function resetQualityEvolution() {
+  state.qualityEvolution = null;
+  state.qualityEvolutionError = '';
+}
+
+async function loadQualityEvolution(instanceId) {
+  if (!instanceId || state.resultIsDemo || !window.QualityEvolution) {
+    resetQualityEvolution();
+    return;
+  }
+  try {
+    const payload = await fetchJson(`/instances/${instanceId}/quality-evolution`);
+    if (state.selectedInstanceId !== instanceId) return;
+    const mapped = QualityEvolution.mapApiQualityEvolution(payload);
+    state.qualityEvolution = mapped;
+    state.qualityEvolutionError = mapped ? '' : 'A resposta da evolução dos indicadores não pôde ser lida.';
+  } catch (error) {
+    if (state.selectedInstanceId !== instanceId) return;
+    state.qualityEvolution = null;
+    state.qualityEvolutionError = error.message;
+  }
+}
+
+function renderQualityLegendItem(entry) {
+  const item = document.createElement('li');
+  const swatch = document.createElement('span');
+  swatch.className = `quality-evolution-swatch ${entry.dashClass}`;
+  swatch.style.color = entry.color;
+  swatch.setAttribute('aria-hidden', 'true');
+  const marker = document.createElement('span');
+  marker.className = `quality-evolution-marker ${entry.markerClass}`;
+  marker.style.color = entry.color;
+  marker.setAttribute('aria-hidden', 'true');
+  const name = document.createElement('span');
+  name.textContent = entry.label;
+  const assist = document.createElement('span');
+  assist.className = 'sr-only';
+  assist.textContent = `, ${entry.dashLabel}, ${entry.markerLabel}`;
+  item.append(swatch, marker, name, assist);
+  return item;
+}
+
+function paintQualityFigure(figure, prefix) {
+  const plot = document.querySelector(`#${prefix}-plot`);
+  const empty = document.querySelector(`#${prefix}-empty`);
+  const legend = document.querySelector(`#${prefix}-legend`);
+  const canvas = document.querySelector(`#${prefix}-chart`);
+  const xTitle = document.querySelector(`#${prefix}-x`);
+  const yTitle = document.querySelector(`#${prefix}-y`);
+  if (xTitle) xTitle.textContent = figure.xLabel;
+  if (yTitle) yTitle.textContent = figure.yLabel;
+  if (empty) {
+    empty.hidden = !figure.empty;
+    empty.textContent = figure.emptyMessage;
+  }
+  if (plot) plot.hidden = figure.empty;
+  if (legend) {
+    legend.hidden = figure.empty || !figure.curves.length;
+    legend.replaceChildren(...QualityEvolution.legendEntries(figure).map(renderQualityLegendItem));
+  }
+  if (!canvas) return;
+  canvas.setAttribute('aria-label', QualityEvolution.figureDescription(figure));
+  if (figure.empty) return;
+  const bounds = canvas.getBoundingClientRect();
+  if (bounds.width < 2 || bounds.height < 2) return;
+  const context = canvas.getContext('2d');
+  const ratio = window.devicePixelRatio || 1;
+  canvas.width = Math.max(1, Math.round(bounds.width * ratio));
+  canvas.height = Math.max(1, Math.round(bounds.height * ratio));
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  QualityEvolution.drawFigure(context, figure, bounds.width, bounds.height);
+}
+
+function renderQualityEvolution() {
+  const section = document.querySelector('#quality-evolution');
+  if (!section || !window.QualityEvolution) return;
+  const visible = !state.resultIsDemo && Boolean(state.selectedInstanceId);
+  section.hidden = !visible;
+  if (!visible) return;
+  const figures = QualityEvolution.qualityEvolutionFigures(state.qualityEvolution, {
+    emptyMessage: state.qualityEvolutionError
+      ? 'Não foi possível carregar a evolução dos indicadores.'
+      : undefined,
+  });
+  paintQualityFigure(figures[0], 'hv-evolution');
+  paintQualityFigure(figures[1], 'spread-evolution');
+}
+
+function drawHypervolumeReferenceMarker(px, py) {
+  chartContext.save();
+  chartContext.setLineDash([]);
+  chartContext.lineWidth = 1.6;
+  chartContext.strokeStyle = '#182b25';
+  chartContext.fillStyle = '#fffefa';
+  chartContext.beginPath();
+  chartContext.arc(px, py, 6.5, 0, Math.PI * 2);
+  chartContext.fill();
+  chartContext.stroke();
+  chartContext.beginPath();
+  chartContext.moveTo(px - 3.5, py);
+  chartContext.lineTo(px + 3.5, py);
+  chartContext.moveTo(px, py - 3.5);
+  chartContext.lineTo(px, py + 3.5);
+  chartContext.stroke();
+  chartContext.restore();
 }
 
 function drawReferenceMarker(anchor, px, py) {
@@ -1976,6 +2128,10 @@ document.querySelector('#instance-selector').addEventListener('change', async (e
     state.tableOffset = 0;
     applyInstanceSummary(state.instance);
     await loadInputAnalysis('time');
+    state.resultIsDemo = false;
+    state.qualityEvolution = null;
+    state.qualityEvolutionError = 'Carregando a evolução dos indicadores.';
+    renderQualityEvolution();
     if (state.activeRun?.status === 'completed') {
       await loadRunResults(state.activeRun.run_id, 0);
     } else {
@@ -1984,6 +2140,7 @@ document.querySelector('#instance-selector').addEventListener('change', async (e
       clearReferencePoints();
       state.resultIsDemo = false;
       renderSolutionTiming(null);
+      await loadQualityEvolution(state.selectedInstanceId);
       renderTable();
       if (['queued', 'running', 'cancel_requested'].includes(state.activeRun?.status)) pollRun(state.activeRun.run_id);
     }
@@ -2008,6 +2165,13 @@ document.querySelector('#neighbors-per-city').addEventListener('change', (event)
 
 const resizeObserver = new ResizeObserver(drawChart);
 resizeObserver.observe(chart);
+const qualityEvolutionSection = document.querySelector('#quality-evolution');
+if (qualityEvolutionSection) {
+  const qualityResizeObserver = new ResizeObserver(() => {
+    if (!qualityEvolutionSection.hidden) renderQualityEvolution();
+  });
+  qualityResizeObserver.observe(qualityEvolutionSection);
+}
 const routeResizeObserver = new ResizeObserver(() => {
   if (document.querySelector('#route-dialog').open) drawExpandedRoute();
 });

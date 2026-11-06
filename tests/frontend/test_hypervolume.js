@@ -10,7 +10,7 @@ const hypervolumeApi = require(path.join(
 
 const directions = { cost: 'minimize', coverage: 'minimize' };
 
-test('hypervolume uses the normalized reference at 1.05 and ignores dominated points', () => {
+test('hypervolume uses the normalized reference at 1.1 and ignores dominated points', () => {
   const summary = hypervolumeApi.summarizeChartSolutions([
     { id: 'a', round: 1, cost: 0, coverage: 4 },
     { id: 'b', round: 1, cost: 4, coverage: 0 },
@@ -20,17 +20,17 @@ test('hypervolume uses the normalized reference at 1.05 and ignores dominated po
   ], directions);
 
   assert.deepEqual(summary.nadir, { cost: 4, coverage: 4 });
-  assert.ok(Math.abs(summary.referencePoint.cost - 1.05) < 1e-9);
-  assert.ok(Math.abs(summary.referencePoint.coverage - 1.05) < 1e-9);
+  assert.ok(Math.abs(summary.referencePoint.cost - 1.1) < 1e-9);
+  assert.ok(Math.abs(summary.referencePoint.coverage - 1.1) < 1e-9);
   assert.equal(summary.rounds[0].candidateCount, 2);
-  assert.ok(Math.abs(summary.rounds[0].hypervolume - 0.1025) < 1e-9);
+  assert.ok(Math.abs(summary.rounds[0].hypervolume - 0.21) < 1e-9);
   assert.equal(summary.rounds[1].candidateCount, 2);
-  assert.ok(Math.abs(summary.rounds[1].hypervolume - 0.39) < 1e-9);
-  assert.ok(Math.abs(summary.meanHypervolume - 0.24625) < 1e-9);
-  assert.ok(Math.abs(summary.sampleStdevHypervolume - Math.sqrt((0.1025 - 0.24625) ** 2 * 2)) < 1e-9);
+  assert.ok(Math.abs(summary.rounds[1].hypervolume - 0.4725) < 1e-9);
+  assert.ok(Math.abs(summary.meanHypervolume - 0.34125) < 1e-9);
+  assert.ok(Math.abs(summary.sampleStdevHypervolume - Math.sqrt((0.21 - 0.34125) ** 2 * 2)) < 1e-9);
   assert.ok(Math.abs(summary.coefficientOfVariation - (summary.sampleStdevHypervolume / summary.meanHypervolume)) < 1e-9);
   assert.equal(summary.meanCandidateCount, 2);
-  assert.ok(Math.abs(summary.rounds[0].distanceToMean - (0.1025 - 0.24625)) < 1e-9);
+  assert.ok(Math.abs(summary.rounds[0].distanceToMean - (0.21 - 0.34125)) < 1e-9);
   assert.equal(summary.unit, null);
   assert.equal(summary.standardDeviation, 'sample');
 });
@@ -46,8 +46,8 @@ test('normalized hypervolume does not inherit absolute objective scales', () => 
   ], directions);
 
   assert.ok(Math.abs(shifted.rounds[0].hypervolume - compact.rounds[0].hypervolume) < 1e-9);
-  assert.ok(Math.abs(shifted.rounds[0].hypervolume - 0.1025) < 1e-9);
-  assert.ok(Math.abs(shifted.referencePoint.cost - 1.05) < 1e-9);
+  assert.ok(Math.abs(shifted.rounds[0].hypervolume - 0.21) < 1e-9);
+  assert.ok(Math.abs(shifted.referencePoint.cost - 1.1) < 1e-9);
 });
 
 test('a single round has sample standard deviation zero', () => {
@@ -84,12 +84,12 @@ test('maximization shifts toward the worse side', () => {
 
   assert.ok(Math.abs(summary.nadir.coverage - 1) < 1e-9);
   assert.ok(Math.abs(summary.nadir.cost - 1) < 1e-9);
-  assert.ok(Math.abs(summary.referencePoint.coverage - 1.05) < 1e-9);
-  assert.ok(Math.abs(summary.referencePoint.cost - 1.05) < 1e-9);
-  assert.ok(Math.abs(summary.rounds[0].hypervolume - 0.1025) < 1e-9);
+  assert.ok(Math.abs(summary.referencePoint.coverage - 1.1) < 1e-9);
+  assert.ok(Math.abs(summary.referencePoint.cost - 1.1) < 1e-9);
+  assert.ok(Math.abs(summary.rounds[0].hypervolume - 0.21) < 1e-9);
 });
 
-test('the drawn reference is 105 percent and a null span stays closed', () => {
+test('the drawn reference is 110 percent and a null span stays closed', () => {
   const anchors = {
     utopian: { cost: 10, coverage: 100 },
     antiutopian: { cost: 14, coverage: 104 },
@@ -98,10 +98,10 @@ test('the drawn reference is 105 percent and a null span stays closed', () => {
   const plotted = hypervolumeApi.objectiveReferencePoint(anchors);
   const percent = referenceApi.normalizeToPercent(plotted, anchors);
 
-  assert.ok(Math.abs(plotted.cost - 14.2) < 1e-9);
-  assert.ok(Math.abs(plotted.coverage - 104.2) < 1e-9);
-  assert.ok(Math.abs(percent.cost - 105) < 1e-6);
-  assert.ok(Math.abs(percent.coverage - 105) < 1e-6);
+  assert.ok(Math.abs(plotted.cost - 14.4) < 1e-9);
+  assert.ok(Math.abs(plotted.coverage - 104.4) < 1e-9);
+  assert.ok(Math.abs(percent.cost - 110) < 1e-6);
+  assert.ok(Math.abs(percent.coverage - 110) < 1e-6);
 
   const flat = hypervolumeApi.objectiveReferencePoint({
     utopian: { cost: 2, coverage: 3 },
@@ -109,7 +109,7 @@ test('the drawn reference is 105 percent and a null span stays closed', () => {
     directions: { cost: 'minimize', coverage: 'minimize' },
   });
   assert.equal(flat.cost, null);
-  assert.ok(Math.abs(flat.coverage - 8.25) < 1e-9);
+  assert.ok(Math.abs(flat.coverage - 8.5) < 1e-9);
 });
 
 test('spread delta is zero on a uniform front and larger when points cluster', () => {
@@ -156,7 +156,7 @@ test('the view exposes kpi text, one table row per round and the expansion contr
   const view = hypervolumeApi.hypervolumeView(summary);
   const roundFilter = require(path.join(__dirname, '../../frontend/mockups/round_filter.js'));
 
-  assert.equal(view.mean, '0.25');
+  assert.equal(view.mean, '0.34');
   assert.deepEqual(view.columns.map((column) => column.label), [
     'Rodada',
     'Hipervolume',
@@ -166,11 +166,11 @@ test('the view exposes kpi text, one table row per round and the expansion contr
   ]);
   assert.equal(view.rows.length, 2);
   assert.equal(view.rows[0].round, 1);
-  assert.equal(view.rows[0].hypervolume, '0.10');
+  assert.equal(view.rows[0].hypervolume, '0.21');
   assert.equal(view.rows[0].candidateCount, '2');
-  assert.equal(view.rows[0].distance, '-0.14');
+  assert.equal(view.rows[0].distance, '-0.13');
   assert.equal(view.rows[0].spread, '0.00');
-  assert.equal(view.rows[1].distance, '+0.14');
+  assert.equal(view.rows[1].distance, '+0.13');
   assert.equal(view.rows[1].spread, '0.50');
   assert.equal(view.rows[0].hypervolume.includes('km'), false);
   assert.equal(view.meanCount, '2.00');
@@ -194,12 +194,12 @@ test('the view exposes kpi text, one table row per round and the expansion contr
 
 test('api payload and the hypervolume preference use the map contract', () => {
   const mapped = hypervolumeApi.mapApiHypervolume({
-    reference_shift: 0.05,
+    reference_shift: 1.1,
     unit: null,
     standard_deviation: 'sample',
-    note: 'Área adimensional. Cada objetivo vai de 0 no utópico a 1 no nadir, e a referência é 1,05.',
+    note: 'Área adimensional. Cada objetivo vai de 0 no utópico a 1 no nadir, e a referência é 1,1 vezes o nadir.',
     nadir: { time: 4, distance: 4 },
-    reference_point: { time: 1.05, distance: 1.05 },
+    reference_point: { time: 1.1, distance: 1.1 },
     rounds: [
       { round: 1, hypervolume: 1.64, candidate_count: 2, distance_to_mean: -2.3, spread: 0.8 },
     ],
@@ -213,8 +213,8 @@ test('api payload and the hypervolume preference use the map contract', () => {
     spread_note: 'Δ = 0 indica distribuição uniforme.',
   });
 
-  assert.equal(mapped.referencePoint.cost, 1.05);
-  assert.equal(mapped.referencePoint.coverage, 1.05);
+  assert.equal(mapped.referencePoint.cost, 1.1);
+  assert.equal(mapped.referencePoint.coverage, 1.1);
   assert.equal(mapped.unit, null);
   assert.equal(hypervolumeApi.hypervolumeView(mapped).rows[0].hypervolume.includes('km'), false);
   assert.equal(hypervolumeApi.hypervolumeView(mapped).rows[0].spread, '0.80');
@@ -225,7 +225,7 @@ test('api payload and the hypervolume preference use the map contract', () => {
   assert.equal(hypervolumeApi.hypervolumeView(mapped).rows[0].round, 1);
 
   const unavailable = hypervolumeApi.mapApiHypervolume({
-    reference_shift: 0.05,
+    reference_shift: 1.1,
     nadir: { time: 0, distance: 0 },
     reference_point: { time: 0, distance: 0 },
     rounds: [
@@ -256,5 +256,12 @@ test('api payload and the hypervolume preference use the map contract', () => {
   hypervolumeApi.writeShowHypervolume(storage, true);
   assert.equal(saved.get(hypervolumeApi.STORAGE_KEY), '1');
   assert.equal(hypervolumeApi.STORAGE_KEY, 'paretolab.showHypervolume');
+  assert.equal(hypervolumeApi.readShowHypervolume(storage), true);
+  assert.equal(hypervolumeApi.REFERENCE_STORAGE_KEY, 'paretolab.showHypervolumeReference');
+  assert.equal(hypervolumeApi.REFERENCE_LABEL, 'Referência do hipervolume');
+  assert.equal(hypervolumeApi.readShowHypervolumeReference(storage), false);
+  hypervolumeApi.writeShowHypervolumeReference(storage, true);
+  assert.equal(saved.get(hypervolumeApi.REFERENCE_STORAGE_KEY), '1');
+  assert.equal(hypervolumeApi.readShowHypervolumeReference(storage), true);
   assert.equal(hypervolumeApi.readShowHypervolume(storage), true);
 });

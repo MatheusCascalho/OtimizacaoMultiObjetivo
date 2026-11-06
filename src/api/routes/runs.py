@@ -13,9 +13,19 @@ from infrastructure.persistence.postgres.models import CityLayout, Instance, Not
 from multiobjective_algorithms import (
     ObjectiveSpec,
     ReferencePointError,
+    aggregate_quality_evolution,
+    configuration_key,
     estimate_reference_points,
+    is_exact_execution,
+    measure_run_indicators,
     summarize_run_hypervolume,
     summarize_run_spread,
+)
+from multiobjective_algorithms.quality_evolution import (
+    ITERATION_AXIS,
+    MeanCurve,
+    RunIndicatorTrack,
+    stable_number,
 )
 from workflow_instance.domain.frontier_sampling import (
     DEFAULT_ITERATIONS,
@@ -494,7 +504,7 @@ def _hypervolume_payload(
         "spread_coefficient_of_variation": spread.coefficient_of_variation,
         "note": (
             "Área adimensional no espaço normalizado: cada objetivo vai de 0 no utópico a 1 no nadir. "
-            "A referência é 1,05 em cada eixo com faixa positiva, depois da normalização, "
+            "A referência é 1,1 vezes o nadir normalizado em cada eixo com faixa positiva, "
             "e vale para todas as rodadas. Faixa nula permanece 0. "
             "O desvio padrão é amostral (n − 1); com uma rodada ele vale 0. "
             "O coeficiente de variação é esse desvio dividido pela média de todas as rodadas; "
@@ -508,6 +518,148 @@ def _hypervolume_payload(
             "O coeficiente de variação é nulo se a média de Δ é 0."
         ),
     }
+
+
+@runs_blueprint.get("/instances/<instance_id>/quality-evolution")
+def get_instance_quality_evolution(instance_id: str):
+    engine = current_app.extensions["paretolab_database_engine"]
+    with Session(engine) as session:
+        instance = session.get(Instance, instance_id)
+        if instance is None:
+            return _error("instance_not_found", "A instância solicitada não existe.", 404)
+        if instance.status == "deleting":
+            return _error("instance_unavailable", "A instância está sendo excluída.", 409)
+        problem_type = current_app.extensions["paretolab_catalog"].get_problem_type(instance.problem_type_id)
+        if problem_type is None:
+            return _error(
+                "unknown_problem_type",
+                "O tipo de problema da instância não está no catálogo.",
+                422,
+            )
+        runs = session.scalars(
+            select(Run).where(Run.instance_id == instance_id, Run.status == "completed")
+        ).all()
+        rows = session.scalars(
+            select(RunSolution).where(RunSolution.run_id.in_([run.run_id for run in runs]))
+        ).all() if runs else []
+        solutions_by_run: dict[str, list[RunSolution]] = {}
+        for row in rows:
+            solutions_by_run.setdefault(row.run_id, []).append(row)
+        try:
+            tracks = [
+                _quality_track(run, solutions_by_run.get(run.run_id, []), problem_type)
+                for run in runs
+            ]
+            tracks = [track for track in tracks if track is not None]
+            curves = aggregate_quality_evolution(tracks)
+        except ReferencePointError as error:
+            details = [{"stage": error.stage}] if error.stage else []
+            return _error("quality_evolution_unavailable", str(error), 409, details)
+        except ValueError as error:
+            return _error("invalid_quality_evolution", str(error), 422)
+        payload = _quality_evolution_payload(instance.instance_id, problem_type, curves)
+    return jsonify(payload), 200
+
+
+def _quality_track(run: Run, rows: list[RunSolution], problem_type: dict) -> RunIndicatorTrack | None:
+    if not rows:
+        return None
+    distinct_rounds = {row.round_index for row in rows}
+    if is_exact_execution(len(distinct_rounds), _catalog_exact(problem_type, run.algorithm_id)):
+        return None
+    objectives = _reference_objectives(problem_type, rows)
+    samples = measure_run_indicators(
+        [{"round": row.round_index, **(row.objective_values or {})} for row in rows],
+        objectives,
+    )
+    return RunIndicatorTrack(
+        algorithm_id=run.algorithm_id,
+        configuration=configuration_key(run.parameters),
+        samples=samples,
+        exact=False,
+    )
+
+
+def _catalog_exact(problem_type: dict, algorithm_id: str) -> bool | None:
+    algorithm = next(
+        (item for item in problem_type.get("algorithms") or [] if item.get("id") == algorithm_id),
+        None,
+    )
+    if not algorithm:
+        return None
+    if algorithm.get("exact") is True or algorithm.get("method") == "exact":
+        return True
+    if algorithm.get("exact") is False or algorithm.get("method") in {"heuristic", "metaheuristic"}:
+        return False
+    return None
+
+
+def _quality_evolution_payload(instance_id: str, problem_type: dict, curves: tuple[MeanCurve, ...]) -> dict:
+    names = {
+        item["id"]: item.get("name")
+        for item in problem_type.get("algorithms") or []
+        if item.get("id")
+    }
+    counts: dict[str, int] = {}
+    for curve in curves:
+        counts[curve.algorithm_id] = counts.get(curve.algorithm_id, 0) + 1
+
+    def curve_payload(curve: MeanCurve, value_name: str) -> dict:
+        return {
+            "algorithm_id": curve.algorithm_id,
+            "label": _evolution_label(curve, names, counts[curve.algorithm_id] > 1),
+            "points": [
+                {
+                    "iteration": stable_number(point.iteration),
+                    "mean": stable_number(getattr(point, value_name)),
+                }
+                for point in curve.points
+            ],
+        }
+
+    return {
+        "instance_id": instance_id,
+        "axis": ITERATION_AXIS,
+        "axis_label": "Iterações",
+        "space": "normalized_objectives",
+        "hypervolume": {"curves": [curve_payload(curve, "hypervolume") for curve in curves]},
+        "spread": {"curves": [curve_payload(curve, "spread") for curve in curves]},
+        "note": (
+            "Cada curva é a média entre execuções não exatas da mesma instância, algoritmo e parâmetros, "
+            "sem contar a semente. O eixo horizontal é a rodada armazenada, tratada como iteração, "
+            "porque a fronteira candidata só existe por rodada. "
+            "Há no máximo 10 instantes, os mais próximos de cada décimo até o fim; "
+            "com menos de 10 rodadas entram todas. "
+            "Se as execuções tiverem tamanhos diferentes, o k-ésimo de 10 alinha a mesma fração do avanço "
+            "e a abscissa é a média das iterações nesse décimo. "
+            "O utópico e o nadir são os da execução inteira."
+        ),
+    }
+
+
+def _evolution_label(curve: MeanCurve, names: dict[str, object], distinguish_configuration: bool) -> str:
+    raw_name = names.get(curve.algorithm_id)
+    name = raw_name.strip() if isinstance(raw_name, str) and raw_name.strip() else curve.algorithm_id
+    if not distinguish_configuration:
+        return name
+    details = _configuration_label(curve.configuration)
+    if not details:
+        return name
+    return f"{name} · {details}"
+
+
+def _configuration_label(configuration: tuple[tuple[str, object], ...]) -> str:
+    params = dict(configuration)
+    parts: list[str] = []
+    if "iterations" in params:
+        parts.append(f"{params['iterations']} amostragens")
+    if "repetitions" in params:
+        parts.append(f"{params['repetitions']} rodadas")
+    for key, value in params.items():
+        if key in {"iterations", "repetitions"}:
+            continue
+        parts.append(f"{key} {value}")
+    return " · ".join(parts)
 
 
 @runs_blueprint.get("/runs/<run_id>/solutions/<solution_id>")

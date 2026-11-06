@@ -4,7 +4,9 @@
   root.Hypervolume = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function hypervolumeFactory() {
   const STORAGE_KEY = 'paretolab.showHypervolume';
-  const REFERENCE_SHIFT = 0.05;
+  const REFERENCE_STORAGE_KEY = 'paretolab.showHypervolumeReference';
+  const REFERENCE_LABEL = 'Referência do hipervolume';
+  const REFERENCE_SHIFT = 1.1;
   const EPSILON = 1e-8;
   const NORMALIZE_EPSILON = 1e-12;
 
@@ -18,6 +20,18 @@
 
   function writeShowHypervolume(storage, enabled) {
     storage.setItem(STORAGE_KEY, enabled ? '1' : '0');
+  }
+
+  function readShowHypervolumeReference(storage) {
+    try {
+      return storage.getItem(REFERENCE_STORAGE_KEY) === '1';
+    } catch {
+      return false;
+    }
+  }
+
+  function writeShowHypervolumeReference(storage, enabled) {
+    storage.setItem(REFERENCE_STORAGE_KEY, enabled ? '1' : '0');
   }
 
   function directionOf(directions, key) {
@@ -38,8 +52,7 @@
   }
 
   function shiftNormalized(value) {
-    const numeric = Number(value);
-    return numeric + REFERENCE_SHIFT * Math.abs(numeric);
+    return Number(value) * REFERENCE_SHIFT;
   }
 
   function objectiveReferencePoint(anchors) {
@@ -48,7 +61,7 @@
     const invert = (utopian, nadir, direction) => {
       const span = minimizationValue(nadir, direction) - minimizationValue(utopian, direction);
       if (!(span > NORMALIZE_EPSILON)) return null;
-      const minimized = minimizationValue(utopian, direction) + (1 + REFERENCE_SHIFT) * span;
+      const minimized = minimizationValue(utopian, direction) + REFERENCE_SHIFT * span;
       return direction === 'maximize' ? -minimized : minimized;
     };
     return {
@@ -221,7 +234,7 @@
       referencePoint: reference,
       referenceShift: REFERENCE_SHIFT,
       unit: null,
-      note: 'Área adimensional. Cada objetivo vai de 0 no utópico a 1 no nadir, e a referência é 1,05.',
+      note: 'Área adimensional. Cada objetivo vai de 0 no utópico a 1 no nadir, e a referência é 1,1 vezes o nadir.',
       spreadNote: 'O espalhamento Δ usa o mesmo espaço. Δ = 0 indica distâncias consecutivas iguais e cobertura dos extremos.',
       standardDeviation: 'sample',
       rounds: measured.map((item) => ({
@@ -352,9 +365,13 @@
 
   return {
     STORAGE_KEY,
+    REFERENCE_STORAGE_KEY,
+    REFERENCE_LABEL,
     REFERENCE_SHIFT,
     readShowHypervolume,
     writeShowHypervolume,
+    readShowHypervolumeReference,
+    writeShowHypervolumeReference,
     shiftNormalized,
     objectiveReferencePoint,
     hypervolume2d,

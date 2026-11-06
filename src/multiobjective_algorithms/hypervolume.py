@@ -3,8 +3,8 @@
 The area follows ``docs/algorithms/hipervolume.md``: the union of the
 axis-aligned rectangles between the candidate front and one reference
 point. Objectives are normalized first, from 0 at the utopian point to 1
-at the nadir. The reference is that normalized nadir shifted 5% toward
-the worse side, so a positive range uses 1.05 and a null range stays 0.
+at the nadir. The reference is 1.1 times that normalized nadir, so a
+positive range uses 1.1 and a null range stays 0.
 The same reference is used for every round. The area is dimensionless.
 
 The value is not stored. Callers compute it from the mapped sample.
@@ -26,7 +26,7 @@ from multiobjective_algorithms.reference_points import (
     normalize_objectives,
 )
 
-REFERENCE_SHIFT = 0.05
+REFERENCE_SHIFT = 1.1
 
 
 @dataclass(frozen=True)
@@ -53,20 +53,18 @@ def shift_reference_point(
     normalized_nadir: Sequence[float],
     shift: float = REFERENCE_SHIFT,
 ) -> tuple[float, ...]:
-    """Move each normalized nadir component ``shift`` times its magnitude toward 1.
+    """Multiply each normalized nadir component by ``shift``.
 
     The vector is already in minimization space: 0 is the utopian value and
-    1 is the nadir when the range is positive. A component that stayed 0
-    because the utopian and nadir values coincide is not shifted.
+    1 is the nadir when the range is positive, so the default factor 1.1
+    places a positive range at 1.1. A component that stayed 0 because the
+    utopian and nadir values coincide stays 0.
     """
 
     if not normalized_nadir:
         raise ValueError("o nadir normalizado precisa ter ao menos um objetivo")
     numeric_shift = _non_negative_finite(shift, "shift")
-    return tuple(
-        _finite_value(value) + numeric_shift * abs(_finite_value(value))
-        for value in normalized_nadir
-    )
+    return tuple(_finite_value(value) * numeric_shift for value in normalized_nadir)
 
 
 def hypervolume_2d(
