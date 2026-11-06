@@ -48,6 +48,9 @@ const state = {
   routeGraph: null,
   routeGraphKey: null,
   showReferencePoints: true,
+  showNormalizedScale: false,
+  showDominanceCone: false,
+  showApproximateFrontier: false,
   referencePoints: null,
   referenceRunId: null,
 };
@@ -149,6 +152,27 @@ function initializeLocalSettings() {
       renderTable();
     });
   }
+
+  [
+    ['#toggle-normalized-scale', 'showNormalizedScale', 'NORMALIZE_KEY'],
+    ['#toggle-dominance-cone', 'showDominanceCone', 'CONE_KEY'],
+    ['#toggle-approximate-frontier', 'showApproximateFrontier', 'APPROXIMATE_FRONTIER_KEY'],
+  ].forEach(([selector, stateKey, storageName]) => {
+    const toggle = document.querySelector(selector);
+    if (!toggle || !window.ReferencePoints) return;
+    const storageKey = ReferencePoints[storageName];
+    state[stateKey] = ReferencePoints.readPreference(window.localStorage, storageKey, false);
+    toggle.checked = state[stateKey];
+    toggle.addEventListener('change', () => {
+      state[stateKey] = toggle.checked;
+      try {
+        ReferencePoints.writePreference(window.localStorage, storageKey, state[stateKey]);
+      } catch {
+        setApiStatus('A preferência vale apenas para esta sessão.', true);
+      }
+      renderTable();
+    });
+  });
 }
 
 function applyInstanceSummary(instance) {
@@ -445,6 +469,31 @@ function displayedReferencePoints() {
     return ReferencePoints.estimateFromChartSolutions(state.solutions);
   }
   return null;
+}
+
+function objectiveDirections() {
+  const reference = displayedReferencePoints();
+  return (reference && reference.directions) || { cost: 'minimize', coverage: 'minimize' };
+}
+
+function unionChartSolutions() {
+  const byId = new Map();
+  state.solutions.forEach((solution) => byId.set(solution.id, solution));
+  state.frontiers.forEach((frontier) => {
+    (frontier.points || []).forEach((point) => byId.set(point.id, point));
+  });
+  return [...byId.values()];
+}
+
+function approximateDisplay() {
+  if (!state.showApproximateFrontier || !window.ReferencePoints) return null;
+  const solutions = unionChartSolutions();
+  const classified = ReferencePoints.classifyApproximateFrontier(solutions, objectiveDirections());
+  return {
+    ...classified,
+    solutions,
+    frontierIds: new Set(classified.frontier.map((item) => item.id)),
+  };
 }
 
 async function loadRunResults(runId, offset) {
@@ -991,9 +1040,12 @@ let plottedReferences = [];
 
 function renderTable() {
   const query = searchInput.value.trim().toLowerCase();
-  visibleSolutions = state.solutions.filter((solution) => {
+  const approximate = approximateDisplay();
+  const source = approximate ? approximate.solutions : state.solutions;
+  visibleSolutions = source.filter((solution) => {
     const matchesSearch = `${solution.id} ${solution.cost} ${solution.coverage}`.toLowerCase().includes(query);
-    return matchesSearch && (activeView === 'all' || solution.frontier);
+    const matchesView = Boolean(approximate) || activeView === 'all' || solution.frontier;
+    return matchesSearch && matchesView;
   });
 
   if (state.tableOffset >= visibleSolutions.length && state.tableOffset > 0) {
@@ -1005,13 +1057,15 @@ function renderTable() {
       <td><span class="table-id">SOL-${solution.id}</span></td>
       <td><span class="table-number">${solution.cost.toFixed(2)} km</span></td>
       <td><span class="table-number">${solution.coverage.toFixed(2)} h</span></td>
-      <td><span class="status-pill ${solution.frontier ? 'frontier' : 'dominated'}">${solution.frontier ? 'Não dominada' : 'Dominada'}</span>${solution.round ? `<span class="round-label">Rodada ${solution.round}</span>` : ''}</td>
+      <td><span class="status-pill ${(approximate ? approximate.frontierIds.has(solution.id) : solution.frontier) ? 'frontier' : 'dominated'}">${(approximate ? approximate.frontierIds.has(solution.id) : solution.frontier) ? 'Não dominada' : 'Dominada'}</span>${solution.round ? `<span class="round-label">Rodada ${solution.round}</span>` : ''}</td>
       <td class="row-arrow" aria-hidden="true">↗</td>
     </tr>`).join('');
 
   const shown = pageSolutions.length;
   const tableSummary = document.querySelector('#table-summary');
-  if (!state.solutions.length) {
+  if (approximate && !query) {
+    tableSummary.textContent = `Fronteira aproximada · ${approximate.frontier.length} não dominadas e ${approximate.dominated.length} dominadas na união`;
+  } else if (!state.solutions.length && !approximate) {
     tableSummary.textContent = state.resultIsDemo
       ? 'Dados ilustrativos do protótipo'
       : state.activeRun?.status === 'completed' ? 'A execução não retornou soluções.' : 'Execute a instância para gerar soluções.';
@@ -1029,9 +1083,10 @@ function renderTable() {
     state.tableOffset + state.tablePageSize >= visibleSolutions.length
     && (state.resultIsDemo || state.resultOffset + state.solutions.length >= state.resultTotal);
   document.querySelector('#page-indicator').textContent = `${Math.floor(state.tableOffset / state.tablePageSize) + 1} / ${Math.max(1, Math.ceil(visibleSolutions.length / state.tablePageSize))}`;
-  document.querySelector('#export-csv').disabled = !state.resultIsDemo && !state.solutions.length;
+  document.querySelector('#export-csv').disabled = !state.resultIsDemo && !state.solutions.length && !approximate;
   drawChart();
   renderReferenceDistance();
+  renderMapModeStatus();
   syncRoutePreview();
 }
 
@@ -1047,35 +1102,61 @@ function drawChart() {
   const inset = { left: 39, right: 13, top: 14, bottom: 25 };
   const plotWidth = width - inset.left - inset.right;
   const plotHeight = height - inset.top - inset.bottom;
+  const referenceForScale = displayedReferencePoints();
+  const scaleActive = Boolean(state.showNormalizedScale && referenceForScale && window.ReferencePoints);
+  const referencePoints = state.showReferencePoints ? referenceForScale : null;
+  const approximate = approximateDisplay();
+  const approximatePoints = approximate ? approximate.frontier : null;
+  const selected = findDisplayedSolution(selectedId);
+  const axisPoint = (point) => (
+    scaleActive ? ReferencePoints.normalizeToPercent(point, referenceForScale) : { cost: point.cost, coverage: point.coverage }
+  );
   const scalePoints = [];
   const seenScaleIds = new Set();
-  chartFrontierSolutions().concat(state.solutions).forEach((solution) => {
+  (approximate ? approximate.solutions : chartFrontierSolutions().concat(state.solutions)).forEach((solution) => {
     if (seenScaleIds.has(solution.id)) return;
     seenScaleIds.add(solution.id);
     scalePoints.push(solution);
   });
-  const referencePoints = state.showReferencePoints ? displayedReferencePoints() : null;
-  if (referencePoints) {
-    scalePoints.push(referencePoints.utopian, referencePoints.antiutopian);
+  if (referencePoints) scalePoints.push(referencePoints.utopian, referencePoints.antiutopian);
+  if (selected) scalePoints.push(selected);
+  const axisValues = scalePoints.map(axisPoint);
+  const costs = axisValues.map((point) => point.cost);
+  const coverages = axisValues.map((point) => point.coverage);
+  let minCost = costs.length ? Math.min(...costs) : 0;
+  let maxCost = costs.length ? Math.max(...costs) : 1;
+  let minCoverage = coverages.length ? Math.min(...coverages) : 0;
+  let maxCoverage = coverages.length ? Math.max(...coverages) : 1;
+  if (scaleActive) {
+    minCost = Math.min(0, minCost);
+    maxCost = Math.max(100, maxCost);
+    minCoverage = Math.min(0, minCoverage);
+    maxCoverage = Math.max(100, maxCoverage);
   }
-  chart.setAttribute(
-    'aria-label',
-    referencePoints
-      ? 'Gráfico da fronteira de Pareto com a solução utópica e a solução antiutópica. Tempo em horas no eixo vertical e distância em quilômetros no eixo horizontal.'
-      : 'Gráfico da fronteira de Pareto. Cada rodada aparece com uma cor própria. Tempo em horas no eixo vertical e distância em quilômetros no eixo horizontal.',
-  );
-  const costs = scalePoints.map((solution) => solution.cost);
-  const coverages = scalePoints.map((solution) => solution.coverage);
-  const minCost = costs.length ? Math.min(...costs) : 0;
-  const maxCost = costs.length ? Math.max(...costs) : 1;
-  const minCoverage = coverages.length ? Math.min(...coverages) : 0;
-  const maxCoverage = coverages.length ? Math.max(...coverages) : 1;
-  const costRange = Math.max(maxCost - minCost, 1);
+  const costRange = Math.max(maxCost - minCost, scaleActive ? 1 : 1);
   const coverageRange = Math.max(maxCoverage - minCoverage, 1);
-  const costPadding = costRange * 0.1;
-  const coveragePadding = coverageRange * 0.1;
+  const costPadding = scaleActive ? 0 : costRange * 0.1;
+  const coveragePadding = scaleActive ? 0 : coverageRange * 0.1;
+  const formatTick = scaleActive ? (value) => `${Math.round(value)}%` : (value) => value.toFixed(1);
   const normalizedX = (cost) => inset.left + ((cost - (minCost - costPadding)) / (costRange + costPadding * 2)) * plotWidth;
   const normalizedY = (coverage) => inset.top + (((maxCoverage + coveragePadding) - coverage) / (coverageRange + coveragePadding * 2)) * plotHeight;
+  const place = (point) => {
+    const axis = axisPoint(point);
+    return { x: normalizedX(axis.cost), y: normalizedY(axis.coverage) };
+  };
+  setAxisTitle('#y-axis-title', scaleActive ? 'Tempo (%)' : 'Tempo (h)', '↑');
+  setAxisTitle('#x-axis-title', scaleActive ? 'Distância (%)' : 'Distância (km)', '→');
+  chart.setAttribute(
+    'aria-label',
+    [
+      scaleActive
+        ? 'Gráfico da fronteira de Pareto em percentual do utópico ao nadir.'
+        : 'Gráfico da fronteira de Pareto. Cada rodada aparece com uma cor própria. Tempo em horas no eixo vertical e distância em quilômetros no eixo horizontal.',
+      referencePoints ? 'A solução utópica e a solução antiutópica também estão marcadas.' : '',
+      state.showDominanceCone ? 'O cone de dominância sombreia a região pior ou igual à solução selecionada.' : '',
+      approximate ? 'A fronteira aproximada da união está em destaque e as soluções dominadas continuam visíveis.' : '',
+    ].filter(Boolean).join(' '),
+  );
 
   chartContext.clearRect(0, 0, width, height);
   chartContext.font = '9px "IBM Plex Mono", monospace';
@@ -1092,7 +1173,7 @@ function drawChart() {
     chartContext.stroke();
     chartContext.fillStyle = '#89928a';
     chartContext.textAlign = 'right';
-    chartContext.fillText(value.toFixed(1), inset.left - 8, position);
+    chartContext.fillText(formatTick(value), inset.left - 8, position);
   }
 
   for (let tick = 0; tick <= 4; tick += 1) {
@@ -1105,16 +1186,37 @@ function drawChart() {
     chartContext.stroke();
     chartContext.fillStyle = '#89928a';
     chartContext.textAlign = 'center';
-    chartContext.fillText(value.toFixed(1), position, height - 11);
+    chartContext.fillText(formatTick(value), position, height - 11);
   }
 
-  const series = ParetoFrontierSeries.frontierSeriesFromSolutions(chartFrontierSolutions());
-  const multiRound = series.some((item) => item.round != null);
-  ParetoFrontierSeries.strokeFrontierSeries(chartContext, series, (solution) => ({
-    x: normalizedX(solution.cost),
-    y: normalizedY(solution.coverage),
-  }));
+  const series = approximatePoints
+    ? [{
+      round: null,
+      label: 'Fronteira aproximada',
+      color: '#28624d',
+      dash: [],
+      points: approximatePoints.slice().sort((left, right) => left.cost - right.cost || left.coverage - right.coverage),
+    }]
+    : ParetoFrontierSeries.frontierSeriesFromSolutions(chartFrontierSolutions());
+  const multiRound = !approximatePoints && series.some((item) => item.round != null);
+  if (selected && state.showDominanceCone) shadeDominanceCone(place(selected), directionsWorseToward(scaleActive), inset, width, height);
+  ParetoFrontierSeries.strokeFrontierSeries(chartContext, series, (solution) => place(solution));
   renderRoundLegend(series);
+  const approximateKey = document.querySelector('#approximate-frontier-key');
+  const scaleKey = document.querySelector('#scale-key');
+  const coneKey = document.querySelector('#cone-key');
+  if (approximate) {
+    const singleKey = document.querySelector('#single-frontier-key');
+    const dominatedKey = document.querySelector('#dominated-key');
+    if (singleKey) singleKey.hidden = true;
+    if (dominatedKey) dominatedKey.hidden = false;
+  } else {
+    const dominatedKey = document.querySelector('#dominated-key');
+    if (dominatedKey) dominatedKey.hidden = false;
+  }
+  if (approximateKey) approximateKey.hidden = !approximatePoints;
+  if (scaleKey) scaleKey.hidden = !scaleActive;
+  if (coneKey) coneKey.hidden = !(state.showDominanceCone && selected);
   const utopianKey = document.querySelector('#reference-key-utopian');
   const antiutopianKey = document.querySelector('#reference-key-antiutopian');
   if (utopianKey) utopianKey.hidden = !referencePoints;
@@ -1126,32 +1228,43 @@ function drawChart() {
 
   plottedPoints = [];
   plottedReferences = [];
-  if (referencePoints) {
-    const selected = findDisplayedSolution(selectedId);
-    if (selected?.frontier) {
-      const originX = normalizedX(selected.cost);
-      const originY = normalizedY(selected.coverage);
-      [referencePoints.utopian, referencePoints.antiutopian].forEach((anchor) => {
-        chartContext.beginPath();
-        chartContext.moveTo(originX, originY);
-        chartContext.lineTo(normalizedX(anchor.cost), normalizedY(anchor.coverage));
-        chartContext.setLineDash(anchor.id === 'utopian' ? [2, 3] : [6, 4]);
-        chartContext.strokeStyle = '#182b25';
-        chartContext.lineWidth = 1;
-        chartContext.stroke();
-      });
-      chartContext.setLineDash([]);
-    }
+  if (referencePoints && selected?.frontier) {
+    const origin = place(selected);
+    [referencePoints.utopian, referencePoints.antiutopian].forEach((anchor) => {
+      const target = place(anchor);
+      chartContext.beginPath();
+      chartContext.moveTo(origin.x, origin.y);
+      chartContext.lineTo(target.x, target.y);
+      chartContext.setLineDash(anchor.id === 'utopian' ? [2, 3] : [6, 4]);
+      chartContext.strokeStyle = '#182b25';
+      chartContext.lineWidth = 1;
+      chartContext.stroke();
+    });
+    chartContext.setLineDash([]);
   }
   const frontierPoints = series.flatMap((item) => item.points);
-  const pointsToDraw = activeView === 'all'
-    ? frontierPoints.concat(state.solutions.filter((solution) => !solution.frontier && !frontierPoints.some((point) => point.id === solution.id)))
-    : frontierPoints;
+  let pointsToDraw = approximate
+    ? approximate.solutions
+    : activeView === 'all'
+      ? frontierPoints.concat(state.solutions.filter((solution) => !solution.frontier && !frontierPoints.some((point) => point.id === solution.id)))
+      : frontierPoints;
+  if (selected && state.showDominanceCone && !pointsToDraw.some((point) => point.id === selected.id)) {
+    pointsToDraw = pointsToDraw.concat(selected);
+  }
+  if (state.showDominanceCone && selected && window.ReferencePoints) {
+    pointsToDraw = ReferencePoints.visibleUnderCone(
+      pointsToDraw,
+      selected,
+      referenceForScale || { directions: objectiveDirections() },
+      scaleActive,
+    );
+  }
   pointsToDraw.forEach((solution) => {
-    const px = normalizedX(solution.cost);
-    const py = normalizedY(solution.coverage);
+    const position = place(solution);
+    const px = position.x;
+    const py = position.y;
     const isSelected = solution.id === selectedId;
-    const isFrontier = solution.frontier;
+    const isFrontier = approximate ? approximate.frontierIds.has(solution.id) : solution.frontier;
     const seriesColor = colorById.get(solution.id);
     plottedPoints.push({ solution, x: px, y: py });
 
@@ -1178,11 +1291,7 @@ function drawChart() {
   });
   if (!referencePoints) return;
   const anchors = [referencePoints.antiutopian, referencePoints.utopian];
-  const anchorPositions = anchors.map((anchor) => ({
-    anchor,
-    x: normalizedX(anchor.cost),
-    y: normalizedY(anchor.coverage),
-  }));
+  const anchorPositions = anchors.map((anchor) => ({ anchor, ...place(anchor) }));
   const stacked = Math.hypot(
     anchorPositions[0].x - anchorPositions[1].x,
     anchorPositions[0].y - anchorPositions[1].y,
@@ -1193,6 +1302,60 @@ function drawChart() {
     const labelY = stacked ? item.y + (item.anchor.id === 'utopian' ? -14 : 14) : item.y;
     drawReferenceLabel(item.anchor.label, item.x, labelY, item.anchor.id === 'utopian' && !stacked, width, height, inset);
   });
+}
+
+function setAxisTitle(selector, label, arrow) {
+  const node = document.querySelector(selector);
+  if (!node) return;
+  const mark = document.createElement('span');
+  mark.textContent = arrow;
+  node.replaceChildren(document.createTextNode(`${label} `), mark);
+}
+
+function directionsWorseToward(scaleActive) {
+  const directions = objectiveDirections();
+  const costIncreases = scaleActive || directions.cost !== 'maximize';
+  const coverageIncreases = scaleActive || directions.coverage !== 'maximize';
+  return { x: costIncreases ? 1 : -1, y: coverageIncreases ? -1 : 1 };
+}
+
+function shadeDominanceCone(origin, signs, inset, width, height) {
+  const plotLeft = inset.left;
+  const plotRight = width - inset.right;
+  const plotTop = inset.top;
+  const plotBottom = height - inset.bottom;
+  const x0 = signs.x > 0 ? origin.x : plotLeft;
+  const x1 = signs.x > 0 ? plotRight : origin.x;
+  const y0 = signs.y > 0 ? origin.y : plotTop;
+  const y1 = signs.y > 0 ? plotBottom : origin.y;
+  if (x1 - x0 < 1 || y1 - y0 < 1) return;
+  chartContext.save();
+  chartContext.beginPath();
+  chartContext.rect(plotLeft, plotTop, plotRight - plotLeft, plotBottom - plotTop);
+  chartContext.clip();
+  chartContext.fillStyle = 'rgb(24 43 37 / 14%)';
+  chartContext.fillRect(x0, y0, x1 - x0, y1 - y0);
+  chartContext.beginPath();
+  chartContext.rect(x0, y0, x1 - x0, y1 - y0);
+  chartContext.clip();
+  chartContext.strokeStyle = 'rgb(24 43 37 / 50%)';
+  chartContext.lineWidth = 1;
+  chartContext.setLineDash([]);
+  chartContext.beginPath();
+  const span = Math.max(x1 - x0, y1 - y0);
+  for (let offset = -span; offset < span; offset += 8) {
+    chartContext.moveTo(x0 + offset, y1);
+    chartContext.lineTo(x0 + offset + (y1 - y0), y0);
+  }
+  chartContext.stroke();
+  chartContext.restore();
+}
+
+function renderMapModeStatus() {
+  const scaleStatus = document.querySelector('#scale-status');
+  const coneStatus = document.querySelector('#cone-status');
+  if (scaleStatus) scaleStatus.hidden = !(state.showNormalizedScale && !displayedReferencePoints());
+  if (coneStatus) coneStatus.hidden = !(state.showDominanceCone && !findDisplayedSolution(selectedId));
 }
 
 function drawReferenceMarker(anchor, px, py) {

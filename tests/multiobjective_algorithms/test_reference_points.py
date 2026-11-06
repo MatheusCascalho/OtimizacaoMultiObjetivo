@@ -10,6 +10,7 @@ from multiobjective_algorithms import (
     estimate_reference_points,
     euclidean_distance,
     normalize_objectives,
+    normalized_euclidean_distance,
 )
 
 MIN_F1_F2 = (
@@ -232,5 +233,41 @@ def test_estimate_rejects_empty_non_finite_and_wrong_dimension() -> None:
         estimate_reference_points(({"f1": 1.0, "f2": math.inf},), MIN_F1_F2)
 
 
-def test_euclidean_distance_uses_raw_objective_space() -> None:
+def test_normalized_euclidean_distance_uses_the_utopian_nadir_scale() -> None:
+    reference = estimate_reference_points(
+        (
+            {"f1": 0.0, "f2": 8.0},
+            {"f1": 6.0, "f2": 0.0},
+        ),
+        MIN_F1_F2,
+    )
+    assert reference.utopian == (0.0, 0.0)
+    assert reference.nadir == (6.0, 8.0)
     assert euclidean_distance((0.0, 0.0), (3.0, 4.0)) == 5.0
+    assert normalized_euclidean_distance((3.0, 4.0), reference.utopian, reference) == pytest.approx(
+        math.hypot(0.5, 0.5)
+    )
+    assert normalized_euclidean_distance((3.0, 4.0), reference.nadir, reference) == pytest.approx(
+        math.hypot(0.5, 0.5)
+    )
+
+
+def test_normalized_euclidean_distance_is_zero_on_a_null_range() -> None:
+    reference = estimate_reference_points(({"f1": 2.0, "f2": 3.0},), MIN_F1_F2)
+    assert normalized_euclidean_distance((9.0, 9.0), reference.utopian, reference) == 0.0
+
+
+def test_normalized_euclidean_distance_respects_maximization() -> None:
+    reference = estimate_reference_points(
+        (
+            {"quality": 10.0, "cost": 4.0},
+            {"quality": 4.0, "cost": 0.0},
+        ),
+        (
+            ObjectiveSpec("quality", "maximize"),
+            ObjectiveSpec("cost", "minimize"),
+        ),
+    )
+    assert normalized_euclidean_distance((7.0, 2.0), reference.utopian, reference) == pytest.approx(
+        math.hypot(0.5, 0.5)
+    )

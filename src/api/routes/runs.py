@@ -396,9 +396,9 @@ def _reference_points_payload(run_id: str, problem_type: dict, result) -> dict:
         "antiutopian": point("antiutopian", "Solução antiutópica", result.nadir),
         "distance": {
             "metric": "euclidean",
-            "label": "Distância euclidiana",
-            "space": "objectives",
-            "note": "No espaço dos objetivos, sem normalizar",
+            "label": "Distância euclidiana normalizada",
+            "space": "normalized_objectives",
+            "note": "Cada objetivo vai de 0 no utópico a 1 no nadir.",
         },
         "note": (
             "Estimativa a partir das soluções mapeadas. "

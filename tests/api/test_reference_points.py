@@ -100,9 +100,9 @@ def test_reference_points_use_lexicographic_selection_on_the_mapped_front(app: F
     assert body["antiutopian"]["objective_values"] == {"time": 4.0, "distance": 4.0}
     assert body["distance"] == {
         "metric": "euclidean",
-        "label": "Distância euclidiana",
-        "space": "objectives",
-        "note": "No espaço dos objetivos, sem normalizar",
+        "label": "Distância euclidiana normalizada",
+        "space": "normalized_objectives",
+        "note": "Cada objetivo vai de 0 no utópico a 1 no nadir.",
     }
     assert [item["id"] for item in body["objectives"]] == ["time", "distance"]
     assert body["objectives"][1]["unit"] == "km"

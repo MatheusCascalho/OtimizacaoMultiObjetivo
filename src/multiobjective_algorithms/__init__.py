@@ -10,6 +10,7 @@ from multiobjective_algorithms.reference_points import (
     estimate_reference_points,
     euclidean_distance,
     normalize_objectives,
+    normalized_euclidean_distance,
 )
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "euclidean_distance",
     "non_dominated_mask",
     "normalize_objectives",
+    "normalized_euclidean_distance",
 ]

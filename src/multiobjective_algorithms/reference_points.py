@@ -211,11 +211,30 @@ def normalize_objectives(
 
 
 def euclidean_distance(left: Sequence[float], right: Sequence[float]) -> float:
-    """Euclidean distance in objective space, without extra normalization."""
+    """Euclidean distance between two objective vectors of the same dimension."""
 
     if len(left) != len(right) or not left:
         raise ValueError("a distância euclidiana exige vetores de objetivos com a mesma dimensão")
     return dist(tuple(_finite_value(value) for value in left), tuple(_finite_value(value) for value in right))
+
+
+def normalized_euclidean_distance(
+    values: Sequence[float],
+    anchor: Sequence[float],
+    reference: ReferencePoints,
+    *,
+    epsilon: float = 1e-12,
+) -> float:
+    """Euclidean distance after mapping each objective to ``[0, 1]``.
+
+    The scale is the same one used by :func:`normalize_objectives`: maximization
+    is negated, and a null utopian–nadir range becomes ``0``.
+    """
+
+    return euclidean_distance(
+        normalize_objectives(values, reference, epsilon=epsilon),
+        normalize_objectives(anchor, reference, epsilon=epsilon),
+    )
 
 
 def _assemble(

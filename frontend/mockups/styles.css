@@ -184,7 +184,10 @@ h2 { margin: 0; font: 600 16px/1.3 var(--display); letter-spacing: 0; }
 .frontier-key { background: var(--green); }
 .dominated-key { border: 1px solid #aeb8ad; background: white; }
 .chart-footnote-right { margin-left: auto; color: #a0a69e; }
-.reference-controls { display: flex; align-items: center; min-height: 28px; margin-top: 2px; }
+.reference-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; min-height: 28px; margin-top: 2px; }
+.map-mode-status { margin: 2px 0 0; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.map-mode-status[hidden] { display: none; }
+.key-hatch { display: inline-block; width: 14px; height: 8px; flex: 0 0 auto; border: 1px solid var(--ink); background: repeating-linear-gradient(-45deg, transparent, transparent 2px, rgb(24 43 37 / 55%) 2px, rgb(24 43 37 / 55%) 3px), rgb(24 43 37 / 14%); }
 .reference-toggle { display: inline-flex; max-width: 100%; align-items: center; gap: 6px; color: var(--ink); font-size: 10px; line-height: 1.35; cursor: pointer; }
 .reference-toggle input { width: 14px; height: 14px; margin: 0; flex: 0 0 auto; accent-color: var(--green); }
 .key-diamond, .key-square { display: inline-block; width: 8px; height: 8px; flex: 0 0 auto; border: 1.5px solid var(--ink); background: var(--surface); }
