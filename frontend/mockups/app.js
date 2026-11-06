@@ -478,24 +478,46 @@ function setTimingValue(selector, value, note) {
   }
 }
 
-function setHypervolumeCoefficient(view) {
-  const node = document.querySelector('#hv-cv');
+function setQualityCoefficient(selector, labelId, text, unavailable, status, accessibleName) {
+  const node = document.querySelector(selector);
   if (!node) return;
-  if (!view || !view.cvUnavailable) {
+  if (!unavailable) {
     node.removeAttribute('aria-label');
-    node.setAttribute('aria-labelledby', 'hv-cv-label');
-    setTimingValue('#hv-cv', view ? view.cv : '--');
+    node.setAttribute('aria-labelledby', labelId);
+    setTimingValue(selector, text || '--');
     return;
   }
   node.removeAttribute('aria-labelledby');
-  node.setAttribute('aria-label', 'Coeficiente de variação do hipervolume, indisponível');
+  node.setAttribute('aria-label', accessibleName);
   const visible = document.createElement('span');
   visible.setAttribute('aria-hidden', 'true');
-  visible.textContent = view.cv;
-  const status = document.createElement('span');
-  status.className = 'sr-only';
-  status.textContent = view.cvStatus || 'indisponível';
-  node.replaceChildren(visible, status);
+  visible.textContent = text;
+  const statusNode = document.createElement('span');
+  statusNode.className = 'sr-only';
+  statusNode.textContent = status || 'indisponível';
+  node.replaceChildren(visible, statusNode);
+}
+
+function setHypervolumeCoefficient(view) {
+  setQualityCoefficient(
+    '#hv-cv',
+    'hv-cv-label',
+    view ? view.cv : '--',
+    Boolean(view && view.cvUnavailable),
+    view ? view.cvStatus : '',
+    'Coeficiente de variação do hipervolume, indisponível',
+  );
+}
+
+function setSpreadCoefficient(view) {
+  setQualityCoefficient(
+    '#spread-cv',
+    'spread-cv-label',
+    view ? view.spreadCv : '--',
+    Boolean(view && view.spreadCvUnavailable),
+    view ? view.spreadCvStatus : '',
+    'Coeficiente de variação do espalhamento, indisponível',
+  );
 }
 
 function renderSolutionTiming(timing) {
@@ -1565,16 +1587,22 @@ function shadeHypervolume(place, inset, width, height) {
 }
 
 function renderHypervolume() {
-  const cards = document.querySelector('#hypervolume-cards');
+  const wrap = document.querySelector('#quality-rounds-wrap');
+  const table = document.querySelector('#quality-rounds');
+  const body = table ? table.querySelector('tbody') : null;
   const note = document.querySelector('#hypervolume-note');
   const summary = currentHypervolume();
   const view = window.Hypervolume ? Hypervolume.hypervolumeView(summary) : null;
-  if (!view || !cards) {
+  if (!view || !body) {
     setTimingValue('#hv-mean', '--');
     setTimingValue('#hv-stdev', '--');
     setHypervolumeCoefficient(null);
     setTimingValue('#hv-count', '--');
-    if (cards) cards.replaceChildren();
+    setTimingValue('#spread-mean', '--');
+    setTimingValue('#spread-stdev', '--');
+    setSpreadCoefficient(null);
+    if (body) body.replaceChildren();
+    if (wrap) wrap.hidden = true;
     if (note) note.hidden = true;
     return;
   }
@@ -1582,28 +1610,37 @@ function renderHypervolume() {
   setTimingValue('#hv-stdev', view.stdev);
   setHypervolumeCoefficient(view);
   setTimingValue('#hv-count', view.meanCount);
-  const visibleCards = window.RoundFilter
-    ? view.cards.filter((card) => RoundFilter.isRoundVisible(card.round, state.hiddenRounds))
-    : view.cards;
+  setTimingValue('#spread-mean', view.spreadMean);
+  setTimingValue('#spread-stdev', view.spreadStdev);
+  setSpreadCoefficient(view);
+  const visibleRows = window.RoundFilter
+    ? view.rows.filter((row) => RoundFilter.isRoundVisible(row.round, state.hiddenRounds))
+    : view.rows;
   if (note) {
     note.hidden = !view.note;
     note.textContent = view.note;
   }
-  cards.replaceChildren(...visibleCards.map((card) => {
-    const article = document.createElement('article');
-    article.className = 'hypervolume-card';
-    article.setAttribute('aria-label', card.title);
-    const title = document.createElement('h3');
-    title.textContent = card.title;
-    const hypervolume = document.createElement('p');
-    hypervolume.append('Hipervolume ', Object.assign(document.createElement('strong'), { textContent: card.hypervolume }));
-    const count = document.createElement('p');
-    count.textContent = card.candidateCount;
-    const distance = document.createElement('p');
-    distance.append('Distância ao hipervolume médio ', Object.assign(document.createElement('strong'), { textContent: card.distance }));
-    article.append(title, hypervolume, count, distance);
-    return article;
+  if (wrap) wrap.hidden = false;
+  body.replaceChildren(...visibleRows.map((row) => {
+    const line = document.createElement('tr');
+    const roundCell = document.createElement('th');
+    roundCell.scope = 'row';
+    roundCell.textContent = String(row.round);
+    line.append(
+      roundCell,
+      qualityCell(row.hypervolume),
+      qualityCell(row.candidateCount),
+      qualityCell(row.distance),
+      qualityCell(row.spread),
+    );
+    return line;
   }));
+}
+
+function qualityCell(value) {
+  const cell = document.createElement('td');
+  cell.textContent = value;
+  return cell;
 }
 
 function drawReferenceMarker(anchor, px, py) {

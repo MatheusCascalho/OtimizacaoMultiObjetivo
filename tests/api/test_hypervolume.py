@@ -110,8 +110,15 @@ def test_hypervolume_reports_each_round_and_the_sample_aggregates(app: Flask) ->
     )
     assert body["mean_candidate_count"] == pytest.approx(2)
     assert body["rounds"][0]["distance_to_mean"] == pytest.approx(body["rounds"][0]["hypervolume"] - body["mean_hypervolume"])
+    assert body["rounds"][0]["spread"] == pytest.approx(0.0)
+    assert body["rounds"][1]["spread"] == pytest.approx(0.5)
+    assert body["mean_spread"] == pytest.approx(0.25)
+    assert body["spread_coefficient_of_variation"] == pytest.approx(
+        body["sample_stdev_spread"] / body["mean_spread"]
+    )
     assert "1,05" in body["note"]
     assert "utópico" in body["note"]
+    assert "Δ = 0" in body["spread_note"]
 
 
 def test_hypervolume_coefficient_is_zero_for_a_single_round(app: Flask) -> None:
@@ -133,6 +140,9 @@ def test_hypervolume_coefficient_is_zero_for_a_single_round(app: Flask) -> None:
     assert body["sample_stdev_hypervolume"] == 0.0
     assert body["mean_hypervolume"] == pytest.approx(0.1025)
     assert body["coefficient_of_variation"] == 0.0
+    assert body["mean_spread"] == pytest.approx(0.0)
+    assert body["sample_stdev_spread"] == 0.0
+    assert body["spread_coefficient_of_variation"] is None
 
 
 def test_hypervolume_coefficient_is_null_when_the_mean_is_zero(app: Flask) -> None:
@@ -153,6 +163,9 @@ def test_hypervolume_coefficient_is_null_when_the_mean_is_zero(app: Flask) -> No
     body = response.json
     assert body["mean_hypervolume"] == 0.0
     assert body["coefficient_of_variation"] is None
+    assert body["rounds"][0]["spread"] == pytest.approx(1.0)
+    assert body["mean_spread"] == pytest.approx(1.0)
+    assert body["spread_coefficient_of_variation"] == 0.0
 
 
 def test_hypervolume_requires_a_completed_run(app: Flask) -> None:

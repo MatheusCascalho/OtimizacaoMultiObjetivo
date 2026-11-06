@@ -31,7 +31,7 @@ test('showing all rounds restores every point', () => {
   assert.deepEqual(afterClear.map((item) => item.id), []);
 });
 
-test('a hidden round is omitted from the hypervolume areas and cards', () => {
+test('a hidden round is omitted from the hypervolume areas and the quality table', () => {
   const rounds = [
     { round: 1, hypervolume: 1.64, points: [{ id: 'a', cost: 1, coverage: 4 }] },
     { round: 2, hypervolume: 6.24, points: [{ id: 'c', cost: 0, coverage: 0 }] },

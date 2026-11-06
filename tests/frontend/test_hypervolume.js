@@ -112,7 +112,41 @@ test('the drawn reference is 105 percent and a null span stays closed', () => {
   assert.ok(Math.abs(flat.coverage - 8.25) < 1e-9);
 });
 
-test('the view exposes kpi text, one card per round and the expansion control', () => {
+test('spread delta is zero on a uniform front and larger when points cluster', () => {
+  const extremes = { f1: { f1: 0, f2: 1 }, f2: { f1: 1, f2: 0 } };
+  const uniform = hypervolumeApi.spreadDelta([
+    { f1: 0, f2: 1 },
+    { f1: 0.5, f2: 0.5 },
+    { f1: 1, f2: 0 },
+  ], extremes);
+  const concentrated = hypervolumeApi.spreadDelta([
+    { f1: 0, f2: 1 },
+    { f1: 0.1, f2: 0.9 },
+    { f1: 1, f2: 0 },
+  ], extremes);
+
+  assert.ok(Math.abs(uniform) < 1e-9);
+  assert.ok(Math.abs(concentrated - 0.8) < 1e-9);
+  assert.equal(hypervolumeApi.spreadDelta([{ f1: 0, f2: 1 }], extremes), 1);
+});
+
+test('normalized spread does not inherit absolute objective scales', () => {
+  const compact = hypervolumeApi.summarizeChartSolutions([
+    { round: 1, cost: 1, coverage: 0 },
+    { round: 1, cost: 0.5, coverage: 0.5 },
+    { round: 1, cost: 0, coverage: 1 },
+  ], directions);
+  const stretched = hypervolumeApi.summarizeChartSolutions([
+    { round: 1, cost: 4000, coverage: 10 },
+    { round: 1, cost: 2000, coverage: 12 },
+    { round: 1, cost: 0, coverage: 14 },
+  ], directions);
+
+  assert.ok(Math.abs(compact.rounds[0].spread) < 1e-9);
+  assert.ok(Math.abs(stretched.rounds[0].spread - compact.rounds[0].spread) < 1e-9);
+});
+
+test('the view exposes kpi text, one table row per round and the expansion control', () => {
   const summary = hypervolumeApi.summarizeChartSolutions([
     { round: 1, cost: 0, coverage: 4 },
     { round: 1, cost: 4, coverage: 0 },
@@ -120,18 +154,34 @@ test('the view exposes kpi text, one card per round and the expansion control', 
     { round: 2, cost: 3, coverage: 1 },
   ], directions);
   const view = hypervolumeApi.hypervolumeView(summary);
+  const roundFilter = require(path.join(__dirname, '../../frontend/mockups/round_filter.js'));
 
   assert.equal(view.mean, '0.25');
-  assert.equal(view.cards.length, 2);
-  assert.equal(view.cards[0].title, 'Rodada 1');
-  assert.equal(view.cards[0].hypervolume, '0.10');
-  assert.equal(view.cards[0].candidateCount, '2 soluções na fronteira candidata');
-  assert.equal(view.cards[0].distance, '-0.14');
-  assert.equal(view.cards[1].distance, '+0.14');
-  assert.equal(view.cards[0].hypervolume.includes('km'), false);
+  assert.deepEqual(view.columns.map((column) => column.label), [
+    'Rodada',
+    'Hipervolume',
+    'Soluções na fronteira candidata',
+    'Distância do hipervolume à média',
+    'Espalhamento Δ',
+  ]);
+  assert.equal(view.rows.length, 2);
+  assert.equal(view.rows[0].round, 1);
+  assert.equal(view.rows[0].hypervolume, '0.10');
+  assert.equal(view.rows[0].candidateCount, '2');
+  assert.equal(view.rows[0].distance, '-0.14');
+  assert.equal(view.rows[0].spread, '0.00');
+  assert.equal(view.rows[1].distance, '+0.14');
+  assert.equal(view.rows[1].spread, '0.50');
+  assert.equal(view.rows[0].hypervolume.includes('km'), false);
   assert.equal(view.meanCount, '2.00');
+  assert.equal(view.spreadMean, '0.25');
   assert.equal(view.cv, `${((summary.sampleStdevHypervolume / summary.meanHypervolume) * 100).toFixed(1).replace('.', ',')}%`);
+  assert.equal(view.spreadCv, `${((summary.sampleStdevSpread / summary.meanSpread) * 100).toFixed(1).replace('.', ',')}%`);
   assert.equal(view.cvUnavailable, false);
+  const visibleRows = view.rows.filter((row) => roundFilter.isRoundVisible(row.round, new Set([2])));
+  assert.deepEqual(visibleRows.map((row) => row.round), [1]);
+  assert.equal(view.rows.length, 2);
+  assert.equal(view.spreadMean, '0.25');
 
   const collapsed = hypervolumeApi.chartExpansionState(false);
   const expanded = hypervolumeApi.chartExpansionState(true);
@@ -151,39 +201,51 @@ test('api payload and the hypervolume preference use the map contract', () => {
     nadir: { time: 4, distance: 4 },
     reference_point: { time: 1.05, distance: 1.05 },
     rounds: [
-      { round: 1, hypervolume: 1.64, candidate_count: 2, distance_to_mean: -2.3 },
+      { round: 1, hypervolume: 1.64, candidate_count: 2, distance_to_mean: -2.3, spread: 0.8 },
     ],
     mean_hypervolume: 1.64,
     sample_stdev_hypervolume: 0,
     coefficient_of_variation: 0,
     mean_candidate_count: 2,
+    mean_spread: 0.8,
+    sample_stdev_spread: 0,
+    spread_coefficient_of_variation: 0,
+    spread_note: 'Δ = 0 indica distribuição uniforme.',
   });
 
   assert.equal(mapped.referencePoint.cost, 1.05);
   assert.equal(mapped.referencePoint.coverage, 1.05);
   assert.equal(mapped.unit, null);
-  assert.equal(hypervolumeApi.hypervolumeView(mapped).cards[0].hypervolume.includes('km'), false);
+  assert.equal(hypervolumeApi.hypervolumeView(mapped).rows[0].hypervolume.includes('km'), false);
+  assert.equal(hypervolumeApi.hypervolumeView(mapped).rows[0].spread, '0.80');
+  assert.equal(hypervolumeApi.hypervolumeView(mapped).spreadCv, '0%');
   assert.equal(mapped.rounds[0].candidateCount, 2);
   assert.equal(mapped.coefficientOfVariation, 0);
   assert.equal(hypervolumeApi.hypervolumeView(mapped).cv, '0%');
-  assert.equal(hypervolumeApi.hypervolumeView(mapped).cards[0].title, 'Rodada 1');
+  assert.equal(hypervolumeApi.hypervolumeView(mapped).rows[0].round, 1);
 
   const unavailable = hypervolumeApi.mapApiHypervolume({
     reference_shift: 0.05,
     nadir: { time: 0, distance: 0 },
     reference_point: { time: 0, distance: 0 },
     rounds: [
-      { round: 1, hypervolume: 0, candidate_count: 1, distance_to_mean: 0 },
+      { round: 1, hypervolume: 0, candidate_count: 1, distance_to_mean: 0, spread: 0 },
+      { round: 2, hypervolume: 0, candidate_count: 1, distance_to_mean: 0, spread: 0 },
     ],
     mean_hypervolume: 0,
     sample_stdev_hypervolume: 0,
     coefficient_of_variation: null,
     mean_candidate_count: 1,
+    mean_spread: 0,
+    sample_stdev_spread: 0,
+    spread_coefficient_of_variation: null,
   });
   const unavailableView = hypervolumeApi.hypervolumeView(unavailable);
   assert.equal(unavailable.coefficientOfVariation, null);
   assert.equal(unavailableView.cv, 'indisponível');
   assert.equal(unavailableView.cvStatus, 'indisponível');
+  assert.equal(unavailableView.spreadCv, 'indisponível');
+  assert.equal(unavailableView.spreadCvUnavailable, true);
 
   const saved = new Map();
   const storage = {

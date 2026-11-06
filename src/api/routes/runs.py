@@ -15,6 +15,7 @@ from multiobjective_algorithms import (
     ReferencePointError,
     estimate_reference_points,
     summarize_run_hypervolume,
+    summarize_run_spread,
 )
 from workflow_instance.domain.frontier_sampling import (
     DEFAULT_ITERATIONS,
@@ -437,25 +438,30 @@ def get_run_hypervolume(run_id: str):
                 422,
             )
         rows = session.scalars(select(RunSolution).where(RunSolution.run_id == run_id)).all()
+        samples = [
+            {"round": row.round_index, **(row.objective_values or {})}
+            for row in rows
+        ]
         try:
             objectives = _reference_objectives(problem_type, rows)
-            summary = summarize_run_hypervolume(
-                [
-                    {"round": row.round_index, **(row.objective_values or {})}
-                    for row in rows
-                ],
-                objectives,
-            )
+            summary = summarize_run_hypervolume(samples, objectives)
+            spread = summarize_run_spread(samples, objectives)
         except ReferencePointError as error:
             details = [{"stage": error.stage}] if error.stage else []
             return _error("hypervolume_unavailable", str(error), 409, details)
         except ValueError as error:
             return _error("invalid_hypervolume", str(error), 422)
-        payload = _hypervolume_payload(run.run_id, problem_type, objectives, summary)
+        payload = _hypervolume_payload(run.run_id, problem_type, objectives, summary, spread)
     return jsonify(payload), 200
 
 
-def _hypervolume_payload(run_id: str, _problem_type: dict, objectives: tuple[ObjectiveSpec, ...], summary) -> dict:
+def _hypervolume_payload(
+    run_id: str,
+    _problem_type: dict,
+    objectives: tuple[ObjectiveSpec, ...],
+    summary,
+    spread,
+) -> dict:
     objective_ids = [spec.id for spec in objectives]
 
     def named(values: tuple[float, ...]) -> dict:
@@ -475,13 +481,17 @@ def _hypervolume_payload(run_id: str, _problem_type: dict, objectives: tuple[Obj
                 "hypervolume": item.hypervolume,
                 "candidate_count": item.candidate_count,
                 "distance_to_mean": item.distance_to_mean,
+                "spread": spread_item.spread,
             }
-            for item in summary.rounds
+            for item, spread_item in zip(summary.rounds, spread.rounds, strict=True)
         ],
         "mean_hypervolume": summary.mean_hypervolume,
         "sample_stdev_hypervolume": summary.sample_stdev_hypervolume,
         "coefficient_of_variation": summary.coefficient_of_variation,
         "mean_candidate_count": summary.mean_candidate_count,
+        "mean_spread": spread.mean_spread,
+        "sample_stdev_spread": spread.sample_stdev_spread,
+        "spread_coefficient_of_variation": spread.coefficient_of_variation,
         "note": (
             "Área adimensional no espaço normalizado: cada objetivo vai de 0 no utópico a 1 no nadir. "
             "A referência é 1,05 em cada eixo com faixa positiva, depois da normalização, "
@@ -489,6 +499,13 @@ def _hypervolume_payload(run_id: str, _problem_type: dict, objectives: tuple[Obj
             "O desvio padrão é amostral (n − 1); com uma rodada ele vale 0. "
             "O coeficiente de variação é esse desvio dividido pela média de todas as rodadas; "
             "se a média é 0, o coeficiente não é calculado e o valor é nulo."
+        ),
+        "spread_note": (
+            "O espalhamento Δ é adimensional no mesmo espaço normalizado, de 0 no utópico a 1 no nadir. "
+            "Δ = 0 indica distâncias consecutivas iguais e cobertura dos extremos da união das rodadas. "
+            "Com menos de duas soluções na fronteira candidata, Δ vale 1. "
+            "O desvio padrão é amostral (n − 1); com uma rodada ele vale 0. "
+            "O coeficiente de variação é nulo se a média de Δ é 0."
         ),
     }
 

@@ -9,6 +9,12 @@ from multiobjective_algorithms.hypervolume import (
     shift_reference_point,
     summarize_run_hypervolume,
 )
+from multiobjective_algorithms.spread import (
+    RoundSpread,
+    SpreadSummary,
+    spread_delta,
+    summarize_run_spread,
+)
 from multiobjective_algorithms.reference_points import (
     ObjectiveSpec,
     ReferencePointError,
@@ -27,6 +33,8 @@ __all__ = [
     "REFERENCE_SHIFT",
     "ReferencePointError",
     "RoundHypervolume",
+    "RoundSpread",
+    "SpreadSummary",
     "ReferencePoints",
     "ReferenceWarning",
     "compute_reference_points",
@@ -37,5 +45,7 @@ __all__ = [
     "normalize_objectives",
     "normalized_euclidean_distance",
     "shift_reference_point",
+    "spread_delta",
     "summarize_run_hypervolume",
+    "summarize_run_spread",
 ]

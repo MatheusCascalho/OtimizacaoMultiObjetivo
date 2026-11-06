@@ -81,6 +81,36 @@
     ));
   }
 
+  function spreadDelta(points, extremes) {
+    const ordered = points.slice().sort((left, right) => left.f1 - right.f1 || left.f2 - right.f2);
+    if (ordered.length < 2) return 1;
+    const distances = [];
+    for (let index = 0; index < ordered.length - 1; index += 1) {
+      distances.push(Math.hypot(
+        ordered[index + 1].f1 - ordered[index].f1,
+        ordered[index + 1].f2 - ordered[index].f2,
+      ));
+    }
+    const meanDistance = distances.reduce((sum, value) => sum + value, 0) / distances.length;
+    const deviation = distances.reduce((sum, value) => sum + Math.abs(value - meanDistance), 0);
+    const extremeDistance = Math.hypot(ordered[0].f1 - extremes.f1.f1, ordered[0].f2 - extremes.f1.f2)
+      + Math.hypot(ordered[ordered.length - 1].f1 - extremes.f2.f1, ordered[ordered.length - 1].f2 - extremes.f2.f2);
+    const denominator = extremeDistance + distances.length * meanDistance;
+    if (!(denominator > NORMALIZE_EPSILON)) return 0;
+    return (extremeDistance + deviation) / denominator;
+  }
+
+  function referenceExtremes(points) {
+    return {
+      f1: points.reduce((best, point) => (
+        point.f1 < best.f1 || (point.f1 === best.f1 && point.f2 < best.f2) ? point : best
+      )),
+      f2: points.reduce((best, point) => (
+        point.f2 < best.f2 || (point.f2 === best.f2 && point.f1 < best.f1) ? point : best
+      )),
+    };
+  }
+
   function hypervolume2d(points, reference) {
     const valid = points.filter((point) => point.cost <= reference.cost && point.coverage <= reference.coverage);
     if (!valid.length) return 0;
@@ -158,25 +188,41 @@
       cost: shiftNormalized(normalizedComponent(nadir.cost, utopian.cost, nadir.cost, specs.cost)),
       coverage: shiftNormalized(normalizedComponent(nadir.coverage, utopian.coverage, nadir.coverage, specs.coverage)),
     };
+    const normalizedPoint = (point) => ({
+      f1: normalizedComponent(point.coverage, utopian.coverage, nadir.coverage, specs.coverage),
+      f2: normalizedComponent(point.cost, utopian.cost, nadir.cost, specs.cost),
+      cost: normalizedComponent(point.cost, utopian.cost, nadir.cost, specs.cost),
+      coverage: normalizedComponent(point.coverage, utopian.coverage, nadir.coverage, specs.coverage),
+    });
+    const normalized = points.map(normalizedPoint);
+    const extremes = referenceExtremes(normalized);
     const rounds = [...new Set(points.map((point) => point.round))].sort((left, right) => left - right);
     const measured = rounds.map((round) => {
       const group = points.filter((point) => point.round === round);
       const front = nonDominated(group, specs);
-      const area = hypervolume2d(front.map((point) => ({
-        cost: normalizedComponent(point.cost, utopian.cost, nadir.cost, specs.cost),
-        coverage: normalizedComponent(point.coverage, utopian.coverage, nadir.coverage, specs.coverage),
-      })), reference);
-      return { round, hypervolume: area, candidateCount: front.length, points: front };
+      const normalizedFront = front.map(normalizedPoint);
+      const area = hypervolume2d(normalizedFront, reference);
+      return {
+        round,
+        hypervolume: area,
+        candidateCount: front.length,
+        points: front,
+        spread: spreadDelta(normalizedFront, extremes),
+      };
     });
     const hypervolumes = measured.map((item) => item.hypervolume);
+    const spreads = measured.map((item) => item.spread);
     const meanHypervolume = hypervolumes.reduce((sum, value) => sum + value, 0) / hypervolumes.length;
     const sampleStdevHypervolume = sampleStdev(hypervolumes);
+    const meanSpread = spreads.reduce((sum, value) => sum + value, 0) / spreads.length;
+    const sampleStdevSpread = sampleStdev(spreads);
     return {
       nadir,
       referencePoint: reference,
       referenceShift: REFERENCE_SHIFT,
       unit: null,
       note: 'Área adimensional. Cada objetivo vai de 0 no utópico a 1 no nadir, e a referência é 1,05.',
+      spreadNote: 'O espalhamento Δ usa o mesmo espaço. Δ = 0 indica distâncias consecutivas iguais e cobertura dos extremos.',
       standardDeviation: 'sample',
       rounds: measured.map((item) => ({
         ...item,
@@ -186,6 +232,9 @@
       sampleStdevHypervolume,
       coefficientOfVariation: coefficientOfVariation(meanHypervolume, sampleStdevHypervolume),
       meanCandidateCount: measured.reduce((sum, item) => sum + item.candidateCount, 0) / measured.length,
+      meanSpread,
+      sampleStdevSpread,
+      spreadCoefficientOfVariation: coefficientOfVariation(meanSpread, sampleStdevSpread),
     };
   }
 
@@ -205,23 +254,44 @@
       hypervolume: Number(round.hypervolume),
       candidateCount: round.candidate_count,
       distanceToMean: Number(round.distance_to_mean),
+      spread: Number(round.spread),
     }));
-    if (rounds.some((round) => !Number.isFinite(round.hypervolume) || !Number.isFinite(round.distanceToMean))) return null;
+    if (rounds.some((round) => !Number.isFinite(round.hypervolume) || !Number.isFinite(round.distanceToMean) || !Number.isFinite(round.spread))) return null;
     const meanHypervolume = Number(payload.mean_hypervolume);
     const sampleStdevHypervolume = Number(payload.sample_stdev_hypervolume);
+    const meanSpread = Number(payload.mean_spread);
+    const sampleStdevSpread = Number(payload.sample_stdev_spread);
     return {
       nadir,
       referencePoint,
       referenceShift: payload.reference_shift,
       unit: null,
       note: payload.note || '',
+      spreadNote: payload.spread_note || '',
       standardDeviation: payload.standard_deviation || 'sample',
       rounds,
       meanHypervolume,
       sampleStdevHypervolume,
       coefficientOfVariation: readCoefficientOfVariation(payload, meanHypervolume, sampleStdevHypervolume),
       meanCandidateCount: Number(payload.mean_candidate_count),
+      meanSpread,
+      sampleStdevSpread,
+      spreadCoefficientOfVariation: readNamedCoefficient(
+        payload,
+        'spread_coefficient_of_variation',
+        meanSpread,
+        sampleStdevSpread,
+      ),
     };
+  }
+
+  function readNamedCoefficient(payload, key, mean, sampleStdevValue) {
+    if (payload && Object.prototype.hasOwnProperty.call(payload, key)) {
+      if (payload[key] == null) return null;
+      const value = Number(payload[key]);
+      return Number.isFinite(value) ? value : null;
+    }
+    return coefficientOfVariation(mean, sampleStdevValue);
   }
 
   function formatHypervolume(value) {
@@ -234,9 +304,19 @@
     return value > 0 ? `+${formatted}` : formatted;
   }
 
+  const QUALITY_COLUMNS = [
+    { id: 'round', label: 'Rodada' },
+    { id: 'hypervolume', label: 'Hipervolume' },
+    { id: 'candidateCount', label: 'Soluções na fronteira candidata' },
+    { id: 'distance', label: 'Distância do hipervolume à média' },
+    { id: 'spread', label: 'Espalhamento Δ' },
+  ];
+
   function hypervolumeView(summary) {
     if (!summary || !Array.isArray(summary.rounds)) return null;
     const coefficient = formatCoefficientOfVariation(summary.coefficientOfVariation);
+    const spreadCoefficient = formatCoefficientOfVariation(summary.spreadCoefficientOfVariation);
+    const notes = [summary.note, summary.spreadNote].filter(Boolean);
     return {
       mean: formatHypervolume(summary.meanHypervolume),
       stdev: formatHypervolume(summary.sampleStdevHypervolume),
@@ -244,13 +324,19 @@
       cvUnavailable: coefficient.unavailable,
       cvStatus: coefficient.status,
       meanCount: Number.isFinite(summary.meanCandidateCount) ? summary.meanCandidateCount.toFixed(2) : '--',
-      note: summary.note || '',
-      cards: summary.rounds.map((round) => ({
+      spreadMean: formatHypervolume(summary.meanSpread),
+      spreadStdev: formatHypervolume(summary.sampleStdevSpread),
+      spreadCv: spreadCoefficient.text,
+      spreadCvUnavailable: spreadCoefficient.unavailable,
+      spreadCvStatus: spreadCoefficient.status,
+      note: notes.join(' '),
+      columns: QUALITY_COLUMNS,
+      rows: summary.rounds.map((round) => ({
         round: round.round,
-        title: `Rodada ${round.round}`,
         hypervolume: formatHypervolume(round.hypervolume),
-        candidateCount: `${round.candidateCount} soluções na fronteira candidata`,
+        candidateCount: String(round.candidateCount),
         distance: formatSignedDistance(round.distanceToMean),
+        spread: formatHypervolume(round.spread),
       })),
     };
   }
@@ -272,10 +358,12 @@
     shiftNormalized,
     objectiveReferencePoint,
     hypervolume2d,
+    spreadDelta,
     summarizeChartSolutions,
     mapApiHypervolume,
     formatHypervolume,
     formatSignedDistance,
+    QUALITY_COLUMNS,
     hypervolumeView,
     chartExpansionState,
   };

@@ -95,9 +95,26 @@
             <div class="metric"><span class="metric-label" id="hv-stdev-label">Desvio padrão do hipervolume</span><div class="metric-value" id="hv-stdev" aria-labelledby="hv-stdev-label">--</div></div>
             <div class="metric"><span class="metric-label" id="hv-cv-label">Coeficiente de variação do hipervolume</span><div class="metric-value" id="hv-cv" aria-labelledby="hv-cv-label">--</div></div>
             <div class="metric metric-end"><span class="metric-label" id="hv-count-label">Quantidade média nas fronteiras candidatas</span><div class="metric-value" id="hv-count" aria-labelledby="hv-count-label">--</div></div>
+            <div class="metric"><span class="metric-label" id="spread-mean-label">Média do espalhamento Δ</span><div class="metric-value" id="spread-mean" aria-labelledby="spread-mean-label">--</div></div>
+            <div class="metric"><span class="metric-label" id="spread-stdev-label">Desvio padrão do espalhamento Δ</span><div class="metric-value" id="spread-stdev" aria-labelledby="spread-stdev-label">--</div></div>
+            <div class="metric"><span class="metric-label" id="spread-cv-label">Coeficiente de variação do espalhamento Δ</span><div class="metric-value" id="spread-cv" aria-labelledby="spread-cv-label">--</div></div>
           </section>
-          <p id="hypervolume-note" class="map-mode-status" hidden>O hipervolume é a área adimensional de 0 no utópico a 1 no nadir, com referência em 1,05.</p>
-          <div id="hypervolume-cards" class="hypervolume-cards" aria-label="Hipervolume por rodada"></div>
+          <p id="hypervolume-note" class="map-mode-status" hidden>O hipervolume é a área adimensional de 0 no utópico a 1 no nadir, com referência em 1,05. O espalhamento Δ usa o mesmo espaço; 0 indica distribuição uniforme.</p>
+          <div class="quality-table-scroll" id="quality-rounds-wrap" hidden>
+            <table id="quality-rounds" class="quality-table">
+              <caption class="sr-only">Qualidade por rodada</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Rodada</th>
+                  <th scope="col">Hipervolume</th>
+                  <th scope="col">Soluções na fronteira candidata</th>
+                  <th scope="col">Distância do hipervolume à média</th>
+                  <th scope="col">Espalhamento Δ</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
 
           <section class="input-preview panel" id="input-preview" aria-labelledby="input-preview-title" hidden>
             <div class="panel-heading preview-heading"><div><p class="section-kicker">INSPEÇÃO DOS DADOS</p><h2 id="input-preview-title">Análise prévia</h2></div><div class="segmented-control" role="group" aria-label="Objetivo da análise prévia"><button class="segment active" type="button" data-objective="time">Tempo</button><button class="segment" type="button" data-objective="distance">Distância</button></div></div>
