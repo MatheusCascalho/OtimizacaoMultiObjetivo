@@ -1,241 +1,241 @@
 import tempfile
 import unittest
-from itertools import permutations
 from pathlib import Path
 
 import numpy as np
-import torch
 
 from monoobjective_algorithms.interfaces import SolveRequest
-from monoobjective_algorithms.tsp.heuristics import NeuroLKH, TSPSolution
-from monoobjective_algorithms.tsp.heuristics.neuro_lkh_features import (
-    build_graph_features,
-    candidate_file_contents,
-    penalty_file_contents,
-    transform_atsp_guidance,
+from monoobjective_algorithms.tsp.heuristics import NeuroLKH
+from monoobjective_algorithms.tsp.heuristics.neuro_lkh import neurolkh_checkout
+from monoobjective_algorithms.tsp.heuristics.neurolkh_costs import (
+    restore_jonker_volgenant_tour,
+    scale_symmetric_costs,
 )
-from monoobjective_algorithms.tsp.heuristics.neuro_lkh_model import SparseGCNModel
-from monoobjective_algorithms.tsp.heuristics.neuro_lkh_training import (
-    generate_synthetic_instance,
-    generate_training_examples,
-    held_karp_tour,
-    train_model,
+from optimization_problems.tsp import (
+    JonkerVolgenantSymmetrization,
+    TSPInstance,
+    WeightedCostScalarization,
 )
-from optimization_problems.tsp import TSPInstance
+
+
+class FakeBackend:
+    def __init__(self, tour=(1, 5, 2, 6, 3, 4, 1), error: str | None = None) -> None:
+        self.tour = tour
+        self.error = error
+        self.calls: list[dict[str, object]] = []
+
+    def solve_symmetric(self, cost_matrix, *, trials, seed):
+        self.calls.append(
+            {"cost_matrix": cost_matrix, "trials": trials, "seed": seed}
+        )
+        if self.error is not None:
+            raise RuntimeError(self.error)
+        return self.tour
 
 
 class NeuroLKHTests(unittest.TestCase):
     def setUp(self) -> None:
         self.instance = TSPInstance(
             time_matrix=[
-                [0, 2, 8, 4, 5],
-                [7, 0, 3, 5, 6],
-                [4, 6, 0, 9, 3],
-                [3, 2, 1, 0, 7],
-                [4, 5, 2, 6, 0],
+                [0, 10, 15],
+                [20, 0, 5],
+                [9, 12, 0],
             ],
             distance_matrix=[
-                [0, 5, 9, 3, 2],
-                [8, 0, 2, 7, 4],
-                [3, 7, 0, 6, 2],
-                [4, 5, 8, 0, 3],
-                [7, 3, 5, 4, 0],
+                [0, 1, 4],
+                [8, 0, 2],
+                [3, 6, 0],
             ],
         )
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.checkpoint_path = Path(self.temp_dir.name) / "checkpoint.pt"
-        model = SparseGCNModel(hidden_dim=8, n_gcn_layers=1, n_mlp_layers=2)
-        torch.save(
-            {
-                "model": model.state_dict(),
-                "model_config": {
-                    "node_dim": 4,
-                    "hidden_dim": 8,
-                    "gcn_layers": 1,
-                    "mlp_layers": 2,
-                    "candidate_count": 4,
-                    "training_node_count": 5,
-                },
-            },
-            self.checkpoint_path,
+        self.backend = FakeBackend()
+        self.solver = NeuroLKH(seed=3, backend=self.backend)
+
+    def _expected_matrix(self, weight: float):
+        scalarized = WeightedCostScalarization.scalarize(self.instance, weight)
+        unified = TSPInstance(
+            time_matrix=scalarized.cost_matrix,
+            distance_matrix=scalarized.cost_matrix,
         )
+        return JonkerVolgenantSymmetrization.transform(unified).instance.time_matrix
 
-    def tearDown(self) -> None:
-        self.temp_dir.cleanup()
-
-    def test_graph_features_and_lkh_files_preserve_matrix_candidates(self) -> None:
-        nodes, edges, edge_index, inverse, scale = build_graph_features(
-            self.instance.time_matrix, candidate_count=3
-        )
-
-        self.assertEqual(nodes.shape, (1, 5, 4))
-        self.assertEqual(edges.shape, (1, 15, 1))
-        self.assertEqual(edge_index.shape, (1, 5, 3))
-        self.assertEqual(inverse.shape, (1, 15))
-        self.assertGreater(scale, 0)
-        self.assertIn("1 0 2", candidate_file_contents(((1, 2), (0,), (0,), (0,), (0,))))
-        self.assertEqual(
-            penalty_file_contents([0.25, -0.5], scale=100),
-            "2\n1 25\n2 -50\n",
-        )
-
-    def test_atsp_guidance_matches_lkh_doubled_node_representation(self) -> None:
-        candidates, penalties = transform_atsp_guidance(
-            ((1, 2), (0,), (1,)),
-            (0.25, -0.5, 1.0),
-            candidate_limit=2,
+    def test_backend_receives_the_symmetrized_unified_cost(self) -> None:
+        result = self.solver.solve(
+            self.instance,
+            SolveRequest(objective="time", parameters={"weight": 0.25}),
         )
 
         self.assertEqual(
-            candidates,
-            (
-                (4, 5),
-                (3,),
-                (4,),
-                (1,),
-                (0, 2),
-                (0,),
-            ),
+            self.backend.calls[0]["cost_matrix"],
+            self._expected_matrix(0.25),
         )
-        self.assertEqual(penalties, (0.25, -0.5, 1.0, 0.25, -0.5, 1.0))
-
-    def test_held_karp_matches_brute_force_for_directed_costs(self) -> None:
-        costs = np.asarray(self.instance.time_matrix)
-        tour = held_karp_tour(costs)
-        tour_cost = sum(
-            costs[source, target]
-            for source, target in zip(tour, (*tour[1:], tour[0]))
-        )
-        best_cost = min(
-            sum(
-                costs[source, target]
-                for source, target in zip(
-                    (0, *order), (*order, 0)
-                )
-            )
-            for order in permutations(range(1, len(costs)))
-        )
-
-        self.assertEqual(tour[0], 0)
-        self.assertEqual(set(tour), set(range(len(costs))))
-        self.assertEqual(tour_cost, best_cost)
-
-    def test_synthetic_data_and_one_training_epoch(self) -> None:
-        first = generate_synthetic_instance(5, np.random.default_rng(42))
-        repeated = generate_synthetic_instance(5, np.random.default_rng(42))
-        examples = generate_training_examples(sample_count=2, node_count=5, seed=42)
-        model, losses = train_model(
-            examples,
-            epochs=1,
-            batch_size=2,
-            hidden_dim=8,
-            gcn_layers=1,
-            mlp_layers=2,
-        )
-
-        self.assertTrue(np.allclose(first.time_matrix, repeated.time_matrix))
-        first_times = np.asarray(first.time_matrix)
-        self.assertFalse(np.allclose(first_times, first_times.T))
-        self.assertEqual(len(examples), 2)
-        self.assertEqual(examples[0].target_edges.shape, (5,))
-        self.assertEqual(len(losses), 1)
-        self.assertTrue(np.isfinite(losses[0]))
-        self.assertEqual(len(model.gcn_layers), 1)
-
-    def test_solver_serializes_asymmetric_problem_and_returns_both_costs(self) -> None:
-        captured: dict[str, str] = {}
-
-        def fake_lkh(parameters: str, problem: str) -> list[int]:
-            captured["parameters"] = parameters
-            captured["problem"] = problem
-            for line in parameters.splitlines():
-                if line.startswith(("CANDIDATE_FILE =", "PI_FILE =")):
-                    filepath = Path(line.split("=", 1)[1].strip())
-                    self.assertTrue(filepath.is_file())
-                    self.assertGreater(filepath.stat().st_size, 0)
-            return [1, 2, 3, 4, 5]
-
-        solver = NeuroLKH(
-            self.checkpoint_path,
-            candidate_count=4,
-            candidate_limit=3,
-            trials=2,
-            native_solver=fake_lkh,
-        )
-        result = solver.solve(self.instance, SolveRequest(objective="time"))
-
+        self.assertEqual(self.backend.calls[0]["trials"], 1000)
+        self.assertEqual(self.backend.calls[0]["seed"], 3)
         self.assertEqual(result.status, "feasible")
-        self.assertIsInstance(result.solution, TSPSolution)
-        self.assertEqual(result.solution.route, (1, 2, 3, 4, 5, 1))
-        self.assertIn("TYPE : ATSP", captured["problem"])
-        self.assertIn("EDGE_WEIGHT_FORMAT : FULL_MATRIX", captured["problem"])
-        self.assertIn("RUNS = 2", captured["parameters"])
+        self.assertEqual(result.solution.route, (1, 2, 3, 1))
+        route = result.solution.route
+        self.assertEqual(route[0], route[-1])
         self.assertEqual(
             result.objective_values["time"],
             sum(
                 self.instance.time_matrix[source - 1][target - 1]
-                for source, target in zip(result.solution.route, result.solution.route[1:])
+                for source, target in zip(route, route[1:])
             ),
         )
-
-    def test_native_lkh_solves_symmetric_and_asymmetric_matrices(self) -> None:
-        symmetric_instance = TSPInstance(
-            time_matrix=self.instance.time_matrix,
-            distance_matrix=[
-                [0, 5, 9, 3, 2],
-                [5, 0, 2, 7, 4],
-                [9, 2, 0, 6, 2],
-                [3, 7, 6, 0, 3],
-                [2, 4, 2, 3, 0],
-            ],
+        self.assertEqual(
+            result.objective_values["distance"],
+            sum(
+                self.instance.distance_matrix[source - 1][target - 1]
+                for source, target in zip(route, route[1:])
+            ),
         )
-        solver = NeuroLKH(
-            self.checkpoint_path,
-            candidate_count=4,
-            candidate_limit=3,
-            trials=1,
+        self.assertEqual(result.objective_values["time"], 10 + 5 + 9)
+        self.assertEqual(result.objective_values["distance"], 1 + 2 + 3)
+
+    def test_integer_scale_keeps_coupling_edges_strictly_cheaper(self) -> None:
+        matrix = np.asarray(self._expected_matrix(0.5), dtype=float)
+        scaled, details = scale_symmetric_costs(matrix)
+        node_count = self.instance.node_count
+
+        self.assertLessEqual(int(scaled.max()), 20_000_000)
+        self.assertGreater(details["scale"], 0)
+        for city in range(node_count):
+            coupling = int(scaled[city, node_count + city])
+            for other in range(node_count):
+                if other == city:
+                    continue
+                self.assertLess(coupling, int(scaled[city, node_count + other]))
+
+    def test_same_weight_and_seed_are_deterministic(self) -> None:
+        request = SolveRequest(
+            objective="distance",
+            parameters={"weight": 0.3, "seed": 11, "lkh_trials": 5},
         )
 
-        for instance, objective in (
-            (self.instance, "time"),
-            (symmetric_instance, "distance"),
-        ):
-            result = solver.solve(instance, SolveRequest(objective=objective))
-            route = result.solution.route
+        first = self.solver.solve(self.instance, request)
+        second = NeuroLKH(backend=self.backend).solve(self.instance, request)
 
-            self.assertEqual(result.status, "feasible")
-            self.assertEqual(route[0], route[-1])
-            self.assertEqual(set(route[:-1]), set(range(1, instance.node_count + 1)))
-            self.assertAlmostEqual(
-                result.objective_values[objective],
-                sum(
-                    getattr(instance, f"{objective}_matrix")[source - 1][target - 1]
-                    for source, target in zip(route, route[1:])
-                ),
+        self.assertEqual(first, second)
+        self.assertEqual(self.backend.calls[0]["cost_matrix"], self.backend.calls[1]["cost_matrix"])
+        self.assertEqual(self.backend.calls[0]["seed"], 11)
+        self.assertEqual(self.backend.calls[0]["trials"], 5)
+
+    def test_rejects_bad_objective_limits_and_parameters(self) -> None:
+        for objective in ("time", "distance"):
+            result = self.solver.solve(
+                self.instance,
+                SolveRequest(objective=objective, parameters={"weight": 0}),
             )
-
-    def test_rejects_unsupported_options_and_bad_candidate_config(self) -> None:
-        with self.assertRaisesRegex(ValueError, "cannot exceed"):
-            NeuroLKH(self.checkpoint_path, candidate_count=2, candidate_limit=3)
-
-        solver = NeuroLKH(
-            self.checkpoint_path,
-            candidate_count=4,
-            candidate_limit=3,
-            native_solver=lambda _parameters, _problem: [1, 2, 3, 4, 5],
+            self.assertEqual(result.status, "feasible")
+        result = self.solver.solve(
+            self.instance,
+            SolveRequest(objective="time", parameters={"weight": 1}),
         )
+        self.assertEqual(result.status, "feasible")
+
+        with self.assertRaisesRegex(ValueError, "objective must"):
+            self.solver.solve(self.instance, SolveRequest(objective="cost"))
         with self.assertRaisesRegex(ValueError, "does not support objective limits"):
-            solver.solve(
+            self.solver.solve(
                 self.instance,
                 SolveRequest(objective="time", objective_limits={"distance": 10}),
             )
         with self.assertRaisesRegex(ValueError, "unsupported NeuroLKH parameter"):
-            solver.solve(
+            self.solver.solve(
                 self.instance,
                 SolveRequest(objective="time", parameters={"unknown": True}),
             )
-        with self.assertRaisesRegex(FileNotFoundError, "checkpoint not found"):
-            NeuroLKH(Path(self.temp_dir.name) / "missing.pt")
+        with self.assertRaisesRegex(ValueError, "weight must"):
+            self.solver.solve(
+                self.instance,
+                SolveRequest(objective="time", parameters={"weight": -0.01}),
+            )
+        with self.assertRaisesRegex(ValueError, "weight must"):
+            self.solver.solve(
+                self.instance,
+                SolveRequest(objective="time", parameters={"weight": 1.1}),
+            )
+        with self.assertRaisesRegex(ValueError, "weight must"):
+            self.solver.solve(
+                self.instance,
+                SolveRequest(objective="time", parameters={"weight": True}),
+            )
+        with self.assertRaisesRegex(ValueError, "seed must"):
+            self.solver.solve(
+                self.instance,
+                SolveRequest(objective="time", parameters={"seed": "not-an-integer"}),
+            )
+        with self.assertRaisesRegex(ValueError, "seed must"):
+            self.solver.solve(
+                self.instance,
+                SolveRequest(objective="time", parameters={"seed": True}),
+            )
+        with self.assertRaisesRegex(ValueError, "seed must"):
+            NeuroLKH(seed=True, backend=self.backend)
+        with self.assertRaisesRegex(ValueError, "lkh_trials must"):
+            self.solver.solve(
+                self.instance,
+                SolveRequest(objective="time", parameters={"lkh_trials": 0}),
+            )
+        with self.assertRaisesRegex(ValueError, "lkh_trials must"):
+            self.solver.solve(
+                self.instance,
+                SolveRequest(objective="time", parameters={"lkh_trials": -4}),
+            )
+        with self.assertRaisesRegex(ValueError, "lkh_trials must"):
+            self.solver.solve(
+                self.instance,
+                SolveRequest(objective="time", parameters={"lkh_trials": 1.5}),
+            )
+        with self.assertRaisesRegex(ValueError, "lkh_trials must"):
+            NeuroLKH(lkh_trials=True, backend=self.backend)
+
+    def test_checkout_is_found_by_walking_up_from_the_module(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / "third_party" / "NeuroLKH" / "SRC_swig").mkdir(parents=True)
+            module = directory / "src/pkg/heuristics/neuro_lkh.py"
+            module.parent.mkdir(parents=True)
+            module.write_text("pass", encoding="utf-8")
+
+            found = neurolkh_checkout(module)
+
+        self.assertEqual(found, (directory / "third_party" / "NeuroLKH").resolve())
+
+    def test_forbidden_edges_are_removed_before_decoding(self) -> None:
+        matrix = np.asarray(self._expected_matrix(0.5), dtype=float)
+        valid = [1, 5, 2, 6, 3, 4]
+        # Reverse the segment between the first two real edges so both become
+        # same-partition edges. One 2-opt must restore a decodable cycle.
+        broken = [1, 2, 5, 6, 3, 4]
+        restored = restore_jonker_volgenant_tour(broken, matrix)
+
+        self.assertEqual(set(restored), set(valid))
+        self.assertEqual(len(restored), len(valid))
+        symmetrized = JonkerVolgenantSymmetrization.transform(
+            TSPInstance(
+                time_matrix=WeightedCostScalarization.scalarize(self.instance, 0.5).cost_matrix,
+                distance_matrix=WeightedCostScalarization.scalarize(self.instance, 0.5).cost_matrix,
+            )
+        )
+        route = symmetrized.original_route(restored)
+        self.assertEqual(route[0], route[-1])
+        self.assertEqual(set(route[:-1]), {1, 2, 3})
+        self.assertEqual(restore_jonker_volgenant_tour(valid, matrix), tuple(valid))
+
+    def test_backend_failure_does_not_fabricate_a_tour(self) -> None:
+        failed = NeuroLKH(backend=FakeBackend(error="extension missing"))
+        result = failed.solve(self.instance, SolveRequest(objective="time"))
+
+        self.assertEqual(result.status, "failed")
+        self.assertIsNone(result.solution)
+        self.assertEqual(result.objective_values, {})
+
+        undecodable = NeuroLKH(backend=FakeBackend(tour=(1, 2, 3, 4, 5, 6)))
+        result = undecodable.solve(self.instance, SolveRequest(objective="distance"))
+
+        self.assertEqual(result.status, "failed")
+        self.assertIsNone(result.solution)
+        self.assertEqual(result.objective_values, {})
 
 
 if __name__ == "__main__":

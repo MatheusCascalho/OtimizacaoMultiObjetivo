@@ -1,0 +1,19 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "compose-dev: up",
+            "type": "shell",
+            "command": "exec 9>/tmp/paretolab-compose-dev.lock && flock 9 && docker compose -f compose.yaml -f compose-dev.yaml up -d --wait --wait-timeout 300 api worker paretolab",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "showReuseMessage": false
+            }
+        }
+    ]
+}

@@ -23,6 +23,7 @@ src/
       __init__.py
       instance.py
       heuristics/
+        neuro_lkh.py
         random_heuristic.py
       exact/
   multiobjective_algorithms/
@@ -79,10 +80,6 @@ class MonoobjectiveSolver(Protocol[InstanceT]):
 Todos os solvers obedecem à mesma assinatura, mas podem declarar capacidades distintas. Por exemplo, ε-restrição exige que o solver aceite limites em objetivos secundários; o serviço deve verificar essa capacidade antes de executar e reportar incompatibilidade claramente, sem fallback silencioso. O cliente seleciona um solver compatível com a família do problema e com as capacidades exigidas pelo método multiobjetivo.
 
 Cada heurística deve ter documentação própria em um arquivo Markdown deste diretório, cobrindo seu problema, comportamento, parâmetros, capacidades e limitações.
-
-`NeuroLKH` combina uma SGN treinada no projeto com LKH em C para matrizes
-explícitas. O treinamento, backend e limitações de licença estão descritos em
-[`neuro-lkh.md`](./neuro-lkh.md).
 
 ## Contrato multiobjetivo e fluxo de execução
 

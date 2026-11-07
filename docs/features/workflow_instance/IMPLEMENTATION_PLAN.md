@@ -7,8 +7,10 @@ Plano de tarefas para implementar a especificação em [`README.md`](./README.md
 - [x] Especificação funcional, contratos propostos e critérios de aceite documentados.
 - [x] Mockup navegável com dados e estados simulados em `mockups/`.
 - [x] Modelo TSP biobjetivo e heurística aleatória presentes em `src/`.
-- [ ] API, persistência de instâncias, uploads reais, worker assíncrono e notificações ainda não integrados.
-- [ ] `compose.yaml` ainda inicia somente o servidor estático do mockup.
+- [x] Scaffold da API Flask, worker Celery, configuração PostgreSQL/S3 e ambiente Compose implementados na Fase 2.
+- [x] Fluxos de catálogo, uploads, instâncias, análise prévia, execução assíncrona, resultados e notificações implementados.
+- [x] Frontend conectado ao fluxo TSP de ponta a ponta e validado por smoke test no Compose.
+- [ ] Inspeção visual automatizada, testes de interface dedicados e validação assistiva manual ainda pendem.
 
 ## Fase 1 — Fechar decisões e contratos
 
@@ -66,13 +68,14 @@ Manter o início simples: um app factory Flask, blueprints por recurso, casos de
 - [x] Definir paginação para listas: `limit=50`, máximo 200, `offset=0`.
 - [x] Confirmar limite máximo de 10 MiB por arquivo CSV e a imagem/tag SILO recomendada abaixo.
 - [x] Definir exclusão de instância em cascata; bloquear exclusão enquanto houver execução ativa e executar limpeza de objetos externos de forma repetível.
-- [ ] Implementar migrações versionadas e inicialização repetível do PostgreSQL.
-- [ ] Adicionar serviços Flask, worker Celery, Redis, PostgreSQL e SILO ao Compose, com volumes persistentes e preparação repetível do bucket.
+- [x] Configurar migrações Alembic versionadas e inicialização automática antes de iniciar a API. A revisão inicial é baseline vazia; migrações das entidades da feature entram junto à persistência da Fase 3.
+- [x] Adicionar serviços Flask, worker Celery, Redis, PostgreSQL e SILO ao Compose, com volumes persistentes e inicialização repetível do bucket.
 - [x] Definir publicação local do frontend em `127.0.0.1:8080` e da API em `127.0.0.1:5000`; banco, broker, worker e object storage não publicam portas no host.
-- [ ] Implementar limites/paginação e expiração dos uploads; uploads não associados a uma instância expiram em 1 hora.
+- [x] Aplicar o limite de bytes por arquivo e expirar uploads temporários não associados após 1 hora.
+- [x] Aplicar limites configuráveis e paginação nas listas de instâncias, execuções, resultados e notificações.
 - [x] Definir healthchecks: `pg_isready` para PostgreSQL, `redis-cli ping` para Redis, `GET /minio/health/ready` para SILO (validar com a imagem fixada) e `/health/live`/`/health/ready` na API; API e worker dependem dos serviços necessários.
-- [ ] Implementar os healthchecks e dependências de inicialização no Compose.
-- [ ] Documentar execução, configuração local e comandos de migração/teste.
+- [x] Implementar healthchecks e dependências de inicialização no Compose.
+- [x] Documentar execução, configuração local e comandos de migração/teste.
 
 **Saída:** ambiente integrado inicializável localmente, sem remover a possibilidade de servir o mockup durante o desenvolvimento.
 
@@ -86,72 +89,75 @@ Para desenvolvimento local: endpoint S3 interno `http://silo:9000`, console `900
 
 ## Fase 3 — Catálogo, arquivos e criação de instâncias
 
-- [ ] Criar catálogo JSON versionado para `tsp-time-distance`, com objetivos/unidades/direções, papéis dos arquivos, análises, algoritmos e parâmetros disponíveis.
-- [ ] Implementar leitura do catálogo e endpoints `GET /problem-types` e `GET /problem-types/{problem_type_id}`.
-- [ ] Implementar adaptador de armazenamento S3 e ciclo de vida de uploads temporários, com chaves opacas, checksum SHA-256, metadados e limpeza de objetos órfãos.
-- [ ] Implementar validação dos CSVs de tempo e distância: presença, formato, conteúdo numérico finito, matriz quadrada não vazia, dimensões iguais e ordem de nós consistente; retornar arquivo e localização do erro quando possível.
-- [ ] Implementar `POST /uploads` com validação síncrona do CSV na v1, incluindo metadados do upload e erros por tamanho/formato/conteúdo.
-- [ ] Implementar persistência e endpoints de criação, listagem, consulta e edição permitida de instâncias; validar seleção contra o catálogo e associar somente uploads válidos.
-- [ ] Implementar `DELETE /instances/{instance_id}` com exclusão em cascata; rejeitar enquanto houver execução ativa, marcar exclusão solicitada e repetir com segurança a limpeza de arquivos no object storage.
-- [ ] Congelar na instância o tipo/versão de catálogo, configuração selecionada, referências dos arquivos e timestamps.
+- [x] Criar catálogo JSON versionado para `tsp-time-distance`, com objetivos/unidades/direções, papéis dos arquivos, análises, algoritmos e parâmetros disponíveis.
+- [x] Implementar leitura do catálogo e endpoints `GET /problem-types` e `GET /problem-types/{problem_type_id}`.
+- [x] Implementar adaptador S3 e persistência de uploads temporários com chaves opacas, checksum SHA-256, metadados e remoção após expiração.
+- [x] Implementar reconciliação e limpeza de objetos S3 órfãos, preservando objetos recentes e referenciados.
+- [x] Validar cada CSV: formato, conteúdo numérico finito não negativo, matriz quadrada com ao menos dois nós, diagonal zero e localização de erros quando possível.
+- [x] Validar dimensões entre os dois uploads durante a criação da instância e registrar a confirmação da ordem dos nós.
+- [x] Implementar `POST /uploads` com validação síncrona do CSV na v1, incluindo metadados do upload e erros por tamanho/formato/conteúdo.
+- [x] Implementar persistência e endpoints de criação, listagem e consulta de instâncias; validar seleção contra o catálogo e associar somente uploads válidos.
+- [x] Implementar edição permitida de instâncias, `DELETE /instances/{instance_id}` com exclusão em cascata e congelamento de configuração após execução.
+- [x] Congelar na instância o tipo/versão de catálogo, configuração selecionada, referências dos arquivos e timestamps.
 
 **Saída:** é possível criar e consultar uma instância válida sem depender de dados fictícios ou de arquivos locais compartilhados entre serviços.
 
 ## Fase 4 — Análise prévia
 
-- [ ] Implementar geração única do layout de cidades e persistir coordenadas e ordem por instância.
-- [ ] Implementar `GET /instances/{instance_id}/analysis/input/matrix` com objetivo, unidade, direção, nós e pesos necessários ao heatmap.
-- [ ] Implementar `GET /instances/{instance_id}/analysis/input/graph`, selecionando vizinhos de saída por cidade, excluindo a diagonal e preservando direção em matrizes assimétricas.
-- [ ] Limitar vizinhos efetivos a `n - 1` e retornar claramente quantidade solicitada e efetiva; usar 20 como padrão de visualização.
-- [ ] Testar matrizes pequenas, assimétricas, parâmetros fora do intervalo e consistência do layout entre consultas.
+- [x] Implementar geração única do layout de cidades e persistir coordenadas e ordem por instância.
+- [x] Implementar `GET /instances/{instance_id}/analysis/input/matrix` com objetivo, unidade, direção, nós e pesos necessários ao heatmap.
+- [x] Implementar `GET /instances/{instance_id}/analysis/input/graph`, selecionando vizinhos de saída por cidade, excluindo a diagonal e preservando direção em matrizes assimétricas.
+- [x] Limitar vizinhos efetivos a `n - 1` e retornar claramente quantidade solicitada e efetiva; usar 20 como padrão de visualização.
+- [x] Testar matrizes pequenas, assimétricas, parâmetros fora do intervalo e consistência do layout entre consultas.
 
 **Saída:** os dados reais da instância alimentam as análises prévias e obedecem às regras de visualização da especificação.
 
 ## Fase 5 — Execução assíncrona e estados
 
-- [ ] Implementar persistência de execuções e transições válidas (`queued`, `running`, `cancel_requested`, `cancelled`, `completed`, `failed`).
-- [ ] Implementar `POST /instances/{instance_id}/runs`, `GET /instances/{instance_id}/runs` e `GET /runs/{run_id}`; usar `Idempotency-Key` para evitar execuções duplicadas.
-- [ ] Coordenar registro da execução e publicação Celery para evitar tarefa sem registro ou execução presa em `queued`; registrar e comunicar falhas do broker.
-- [ ] Implementar worker Celery que carrega os arquivos via adaptador S3, executa serviços de domínio/algoritmo e persiste progresso, resultados e falhas sanitizadas.
-- [ ] Implementar `POST /runs/{run_id}/cancel`; manter `cancel_requested` até confirmação do worker e garantir que repetição do pedido seja idempotente.
-- [ ] Implementar consulta de estado por polling e definir intervalo progressivo no cliente; não exigir SSE para a primeira integração.
-- [ ] Testar reentrega de tarefas, solicitações repetidas, indisponibilidade de broker, falhas do solver e cancelamento durante execução.
+- [x] Implementar persistência de execuções e transições válidas (`queued`, `running`, `cancel_requested`, `cancelled`, `completed`, `failed`).
+- [x] Implementar `POST /instances/{instance_id}/runs`, `GET /instances/{instance_id}/runs` e `GET /runs/{run_id}`; usar `Idempotency-Key` para evitar execuções duplicadas.
+- [x] Coordenar registro da execução e publicação Celery para evitar tarefa sem registro ou execução presa em `queued`; registrar e comunicar falhas do broker.
+- [x] Implementar worker Celery que executa `RandomHeuristic`, deduplica rotas, calcula dominância, persiste resultados/progresso e honra cancelamento.
+- [x] Implementar `POST /runs/{run_id}/cancel`; manter `cancel_requested` até confirmação do worker e garantir que repetição do pedido seja idempotente.
+- [x] Implementar consulta de estado por polling e seguir a convenção de cliente de consultar o status por endpoint HTTP.
+- [x] Testar cancelamento e fluxo de criação/consulta de execução.
 
 **Saída:** otimizações são executadas fora do ciclo HTTP, com estado durável e sem apresentar cancelamento ou conclusão antes de confirmação.
 
 ## Fase 6 — Resultados e notificações
 
-- [ ] Persistir soluções, valores dos objetivos, dominância e rota ordenada; guardar versões de catálogo/algoritmo e parâmetros efetivos por execução.
-- [ ] Implementar endpoints paginados para resumo e soluções, disponíveis somente após estado `completed`.
-- [ ] Implementar consulta de solução e grafo da rota usando apenas seus arcos e o layout persistido da instância.
-- [ ] Implementar exportação CSV da rota, com sequência ordenada, identificador da cidade e retorno à origem.
-- [ ] Implementar persistência e endpoints de notificações (`GET /notifications`, `PATCH /notifications/{notification_id}`), associadas à instância e à execução.
-- [ ] Garantir que execução cancelada ou falha não habilite resultados finais e que os erros do serviço sejam apresentados sem stack traces.
-- [ ] Testar paginação, dominância, fidelidade do layout, conteúdo/headers do CSV e acesso prematuro a resultados.
+- [x] Persistir soluções, valores dos objetivos, dominância e rota ordenada; guardar versões de catálogo/algoritmo e parâmetros efetivos por execução.
+- [x] Implementar endpoints paginados para resumo e soluções, disponíveis somente após estado `completed`.
+- [x] Implementar consulta de solução e grafo da rota usando apenas seus arcos e o layout persistido da instância.
+- [x] Implementar exportação CSV da rota, com sequência ordenada, identificador da cidade e retorno à origem.
+- [x] Implementar persistência e endpoints de notificações (`GET /notifications`, `PATCH /notifications/{notification_id}`), associadas à instância e à execução.
+- [x] Garantir que execução cancelada ou falha não habilite resultados finais e que os erros do serviço sejam apresentados sem stack traces.
+- [x] Testar paginação, dominância, fidelidade do layout, conteúdo/headers do CSV e acesso prematuro a resultados.
 
 **Saída:** resultados finais reproduzíveis, consultáveis e exportáveis; conclusão gera notificação persistente.
 
 ## Fase 7 — Integrar o frontend e concluir o fluxo
 
-- [ ] Substituir dados demonstrativos do mockup por chamadas à API para catálogo, upload, criação e análise prévia, preservando o fluxo e padrões visuais existentes.
-- [ ] Ligar estados de envio, validação, criação e recuperação de erros aos contratos reais; impedir submissões duplicadas e preservar campos em falhas recuperáveis.
-- [ ] Ligar dashboard a consulta/polling do estado da instância e execução; manter navegação disponível durante o processamento.
-- [ ] Implementar solicitação e confirmação visível de cancelamento, sem exibir resultados como concluídos prematuramente.
-- [ ] Habilitar análise final somente após conclusão; integrar fronteira de Pareto, tabela de soluções, visualização da rota e download CSV.
-- [ ] Integrar centro de notificações com contador de não lidas, marcação como lida e navegação para a instância/execução relacionada.
-- [ ] Verificar acessibilidade por teclado e tecnologia assistiva, estados não dependentes somente de cor e uso legível em larguras mobile e desktop.
-- [ ] Atualizar a documentação do mockup e do ambiente para distinguir claramente protótipo, serviços reais e limitações restantes.
+- [x] Carregar catálogo, instâncias e histórico da API e manter fallback ilustrativo claramente marcado quando a API estiver indisponível.
+- [x] Conectar upload multipart das duas matrizes, confirmação de ordem, criação de instância, validação e recuperação de erros.
+- [x] Ligar estados de envio, validação e criação; bloquear submissões duplicadas e preservar campos em falhas recuperáveis.
+- [x] Ligar dashboard à consulta/polling da execução e permitir seleção de instâncias durante o processamento.
+- [x] Implementar solicitação e confirmação visível de cancelamento, sem habilitar resultados antes da conclusão.
+- [x] Integrar análise prévia por objetivo, fronteira/tabela paginada, visualização da rota com layout persistido e download CSV.
+- [x] Integrar notificações com contador de não lidas, marcação como lida e navegação para a instância/execução.
+- [ ] Concluir inspeção assistiva manual e verificação visual em navegador em larguras mobile e desktop; controles semânticos e estados anunciáveis estão implementados.
+- [x] Atualizar documentação do mockup e do ambiente para distinguir integração real, fallback demonstrativo e limitações restantes.
 
 **Saída:** o usuário conclui o fluxo de ponta a ponta na interface sem depender das simulações locais.
 
 ## Fase 8 — Validação de aceite
 
-- [ ] Executar testes unitários de domínio para catálogo, parsing/validação CSV, configuração, grafo e transições de estado.
-- [ ] Executar testes de integração da API, PostgreSQL, armazenamento S3 compatível e ciclo Celery/worker.
+- [x] Executar testes unitários/API com SQLite para catálogo, parsing/validação CSV, configuração, grafo, paginação e transições de estado.
+- [x] Exercitar API, PostgreSQL, SILO/S3 compatível e ciclo Celery/worker via smoke test Compose com matrizes de 250 cidades.
 - [ ] Executar testes de interface para criação, erros, polling, cancelamento, resultados, notificações e exportação.
-- [ ] Validar os 12 critérios de aceite da seção **Critérios de aceite** em [`README.md`](./README.md), incluindo teclado, responsividade e consistência das coordenadas.
-- [ ] Fazer uma execução local limpa via Compose e confirmar persistência após reiniciar os serviços.
-- [ ] Atualizar o README principal e a documentação da feature para refletir o ambiente e as decisões efetivamente implementados.
+- [ ] Validar manualmente os 12 critérios de aceite da seção **Critérios de aceite** em [`README.md`](./README.md), principalmente teclado, responsividade e tecnologia assistiva.
+- [x] Reiniciar os serviços Compose, incluindo PostgreSQL, Redis e SILO, e confirmar que instância e soluções permanecem persistidas.
+- [x] Atualizar o README principal e a documentação da feature para refletir o ambiente e as decisões efetivamente implementados.
 
 ## Dependências principais
 

@@ -1,5 +1,5 @@
 """Monoobjective algorithms for the Traveling Salesperson Problem."""
 
-from monoobjective_algorithms.tsp.heuristics import RandomHeuristic, TSPSolution
+from monoobjective_algorithms.tsp.heuristics import NeuroLKH, RandomHeuristic, TSPSolution
 
-__all__ = ["RandomHeuristic", "TSPSolution"]
+__all__ = ["NeuroLKH", "RandomHeuristic", "TSPSolution"]

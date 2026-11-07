@@ -10,7 +10,7 @@ A proposta do projeto é permitir que usuários:
 - criem instâncias a partir do envio de arquivos de entrada;
 - executem os modelos e interpretem os resultados por meio de gráficos e tabelas.
 
-## Arquitetura e tecnologias previstas
+## Arquitetura e tecnologias
 
 O sistema separa interface, serviços da aplicação e algoritmos para manter baixo acoplamento:
 
@@ -21,27 +21,29 @@ O sistema separa interface, serviços da aplicação e algoritmos para manter ba
 - **`multiobjective_algorithms`:** ferramentas de análise multiobjetivo e métodos de geração da fronteira de Pareto, agnósticos às implementações concretas de solver.
 - **Experimentação e dados:** `notebooks/` para execução e visualização; `data/instances/` para instâncias de teste. Consulte o [padrão de desenvolvimento dos algoritmos](docs/algorithms/README.md).
 
-NumPy e Pandas são opções previstas para processamento; Plotly e Seaborn para visualização; Jupyter para experimentação. As implementações concretas e dependências serão definidas conforme os problemas e algoritmos forem integrados.
-
-A arquitetura deve seguir os princípios de Clean Architecture e manter baixo acoplamento para facilitar a substituição do banco de dados, do solver e do framework da API.
+O fluxo local implementado cobre o TSP biobjetivo de tempo e distância: catálogo JSON, upload validado de matrizes CSV, persistência PostgreSQL, armazenamento S3 compatível via SILO, execução Celery/Redis com `RandomHeuristic`, resultados paginados e notificações. A heurística aproxima a fronteira por amostragem e não garante o ótimo global.
 
 ## Execução local com Docker
 
-O container atual serve o mockup estático do front-end. A API, o banco de dados e os solvers ainda não estão integrados.
+O Compose inicia o frontend, API Flask, worker Celery, PostgreSQL, Redis e armazenamento de objetos S3 compatível SILO. O fluxo de criação, análise prévia, execução, cancelamento, resultados e notificações está conectado entre interface e API.
 
-Requisitos: Docker Engine e Docker Compose.
+Requisitos: Docker Engine e Docker Compose. Copie `.env.example` para `.env` e substitua os valores `replace-this-*` por credenciais de desenvolvimento locais antes de iniciar os serviços. Mantenha `POSTGRES_PASSWORD` igual à senha da `DATABASE_URL` e `SILO_ROOT_USER`/`SILO_ROOT_PASSWORD` iguais às credenciais `S3_ACCESS_KEY`/`S3_SECRET_KEY`. Não compartilhe essas credenciais nem as versione.
 
 ```bash
 docker compose up --build
 ```
 
-Depois, acesse [http://localhost:8080](http://localhost:8080). Para usar outra porta local, defina `PARETOLAB_PORT`, por exemplo: `PARETOLAB_PORT=8090 docker compose up --build`.
+Depois, acesse ParetoLab em [http://127.0.0.1:8080](http://127.0.0.1:8080) e o healthcheck da API em [http://127.0.0.1:5000/health/ready](http://127.0.0.1:5000/health/ready). As portas publicadas ficam vinculadas somente ao loopback; PostgreSQL, Redis e SILO não publicam portas no host. Para usar outras portas locais, defina `PARETOLAB_PORT` ou `PARETOLAB_API_PORT` no `.env`.
 
 Para encerrar, use `Ctrl+C` e depois execute `docker compose down`.
 
+Os dados do PostgreSQL e do SILO ficam em volumes Docker persistentes. Para aplicar migrações manualmente, execute `docker compose exec api alembic upgrade head`; na inicialização da API as migrações são aplicadas automaticamente antes do servidor iniciar.
+
+O frontend usa o endpoint padrão `http://127.0.0.1:5000/api/v1`; origens CORS são limitadas a loopback. A versão v1 é single-user local e não possui autenticação; não exponha os serviços à rede.
+
 ## Testes e desenvolvimento
 
-Os testes unitários estão previstos para utilizar Pytest. Também está prevista a adoção de agentes especializados por módulo e de um agente coordenador para delegar tarefas; seus papéis e fluxos serão detalhados conforme o projeto evoluir.
+Os testes unitários utilizam Pytest. Instale as dependências de desenvolvimento com `pip install -r requirements-dev.txt` e execute `PYTHONPATH=src pytest`.
 
 ## Documentação
 

@@ -10,8 +10,10 @@
 - **Tipografia:** Space Grotesk para títulos, DM Sans para interface e IBM Plex Mono para valores, identificadores e metadados. O mockup usa fontes alternativas caso as fontes web não estejam disponíveis.
 - **Princípios de interface:** densidade moderada, hierarquia por tipografia e alinhamento, gráficos como conteúdo principal, controles explícitos e sem decoração que concorra com os dados.
 
-## Mockup
+## Interface local
 
-Abra `index.html` diretamente no navegador. O protótipo usa somente HTML, CSS e JavaScript; os resultados são ilustrativos e não representam a saída de um solver real.
+O frontend usa somente HTML, CSS e JavaScript vanilla. Com a stack Compose ativa, a tela consome o catálogo, upload, instâncias, análise de matrizes/grafo, execução/polling/cancelamento, resultados, notificações e download de rota da API local.
 
-Interações incluídas: selecionar soluções na tabela ou no gráfico, alternar a visualização, filtrar resultados, abrir o fluxo de nova instância e selecionar um arquivo local.
+Sem API disponível, o dashboard mantém um conjunto ilustrativo, identificado como tal; não indica sucesso de criação ou execução. O solver real v1 é `RandomHeuristic` e produz uma aproximação por amostragem, não uma fronteira ótima garantida.
+
+Para testar o fluxo real, configure `.env.example` em `.env`, execute `docker compose up --build` na raiz e abra `http://127.0.0.1:8080`. A API fica em `http://127.0.0.1:5000`; ambas as portas são locais. Não exponha esta versão single-user à rede, pois ainda não há autenticação.

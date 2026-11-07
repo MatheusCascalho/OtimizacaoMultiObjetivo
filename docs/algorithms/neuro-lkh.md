@@ -1,85 +1,64 @@
-# NeuroLKH
+# NeuroLKH — TSP
 
-`NeuroLKH` combina uma Sparse Graph Convolutional Network (SGN) treinavel com
-o algoritmo LKH em C. A rede classifica arestas candidatas e estima penalidades
-de nos; o LKH recebe esses sinais e executa as buscas de troca variavel em
-lambda sobre a matriz explicita do objetivo.
+## Finalidade
 
-## Solver
+Heurística guiada pela rede pré-treinada [NeuroLKH](https://github.com/liangxinedu/NeuroLKH) para uma instância do caixeiro viajante. O solver monoobjetivo recebe o TSP biobjetivo de tempo e distância, unifica os dois custos com um peso e devolve um ciclo. Não treina um modelo novo e não garante o ótimo.
 
-- Entrada: `TSPInstance`, com matrizes alinhadas de tempo e distancia.
-- Objetivo: `time` ou `distance`; a matriz escolhida e enviada ao LKH como
-  `TSP` simetrico ou `ATSP` dirigido.
-- Saida: ciclo Hamiltoniano fechado, indexado a partir de 1, e os valores dos
-  dois objetivos calculados nas matrizes originais.
-- Construtor: `NeuroLKH(model_path, candidate_count=20, candidate_limit=5,
-  trials=10, seed=1234)`.
-- Parametros por chamada: `seed` e `trials`. Limites de objetivos nao sao
-  suportados.
-- O checkpoint deve ter sido treinado por `neuro_lkh_training`; pesos
-  pre-treinados do NeuroLKH original usam coordenadas e outra arquitetura de
-  entrada, portanto nao sao intercambiaveis.
+## Implementação
 
-Exemplo:
+- Classe: `NeuroLKH`
+- Código: [`src/monoobjective_algorithms/tsp/heuristics/neuro_lkh.py`](../../src/monoobjective_algorithms/tsp/heuristics/neuro_lkh.py)
+- Entrada: `TSPInstance`, com matrizes quadradas e alinhadas de tempo e distância.
+- Interface: `MonoobjectiveSolver`, com `SolveRequest` e `SolveResult`.
+- Dependência: submódulo `third_party/NeuroLKH`, checkpoint padrão `third_party/NeuroLKH/pretrained/neurolkh.pt`.
+- Compilação do wrapper SWIG: [`build_neurolkh_swig.sh`](../../build_neurolkh_swig.sh), com Python 3.11. A imagem da API e do worker usa `python:3.11-slim-bookworm`, e o script repete os passos do `setup.sh` (`swig -python LKH.i` e `setup.py build_ext`) com esse interpretador. O código C fica em `third_party/NeuroLKH/SRC_swig`, não em `LKH-3.0.6`.
+- Ambiente isolado, criado uma vez: `python3.11 -m venv third_party/NeuroLKH/.venv`, depois `numpy`, `scikit-learn` e `torch` (CPU). O SWIG usado na compilação foi o pacote pip `swig` desse ambiente, porque o binário do sistema não estava instalado. O script de build aplica o patch de custo explícito antes de compilar.
 
-```python
-solver = NeuroLKH(model_path="models/neuro_lkh.pt")
-result = solver.solve(instance, SolveRequest(objective="distance"))
-```
+## Comportamento
 
-O wrapper escreve arquivos temporarios para candidatos e penalidades, serializa
-a matriz em TSPLIB `FULL_MATRIX` e chama `elkai._elkai.solve_problem`. Os
-arquivos sao removidos ao fim da chamada. Para ATSP, o LKH transforma a matriz
-em uma instancia simetrica de `2n` nos; candidatos dirigidos e penalidades sao
-expandidos para essa representacao antes de chamar o backend. Custos e
-penalidades sao escalados para inteiros internos do LKH, mas os objetivos
-retornados sao recalculados com os custos originais.
+Cada chamada de `solve` trata uma instância e um peso `w` em `[0, 1]`.
 
-## Treinamento
+1. `WeightedCostScalarization.scalarize` normaliza tempo e distância para `[0, 1]` e unifica `s_ij(w) = w * t_hat_ij + (1 - w) * d_hat_ij`.
+2. Essa matriz unificada vira as duas matrizes de uma `TSPInstance` temporária. `JonkerVolgenantSymmetrization.transform` simetriza essa instância, produzindo o TSP simétrico de `2n` nós. As matrizes originais não são simetrizadas em separado.
+3. A rede `SparseGCNModel` recebe coordenadas 2D obtidas por MDS clássico dessa matriz simétrica, só como entrada da rede. A diagonal com penalidade e as arestas de acoplamento negativas não são enviadas ao helper de coordenadas do projeto. O LKH não otimiza a distância euclidiana desse embedding.
+4. `featureGenerate` monta as arestas candidatas e `SparseGCNModel.forward` prediz escores de aresta e penalidades de nó. `LKH.main` recebe essas predições e a matriz simétrica explícita.
+5. O conjunto de candidatas da rede pode deixar algumas arestas proibidas da simetrização. Um 2-opt sobre a matriz explícita troca cada uma delas por uma aresta entre as partições de saída e entrada, reduzindo o custo simétrico, até o ciclo poder ser decodificado.
+6. O ciclo está nos `2n` nós. `JonkerVolgenantSymmetrization.original_route` recupera o ciclo original de `n` cidades, começando e terminando na cidade 1.
+7. `objective_values` soma as matrizes originais de tempo e distância ao longo desse ciclo. O custo escalarizado e o custo simétrico, que inclui o deslocamento `-n * penalty`, não são o tempo nem a distância reportados.
 
-O gerador produz TSPs euclidianos sinteticos: distancia simetrica e tempo
-dirigido, obtido por velocidades aleatorias por arco. O rótulo de arestas e o
-ciclo otimo obtido pelo algoritmo exato Held-Karp. O script limita esse rotulo
-exato a 18 nos para manter o custo exponencial controlado. A perda das
-penalidades usa o grau do 1-tree minimo da matriz simetrizada, conforme a
-formulacao do artigo; para matrizes dirigidas, isso e um sinal aproximado.
+O resultado tem status `feasible` quando o ciclo original é válido. Se a rede, a extensão ou o LKH falham, ou se o ciclo simétrico não pode ser decodificado, o status é `failed`, com `solution=None` e `objective_values` vazio. Não há fallback para `RandomHeuristic` e nenhum ciclo é inventado.
 
-Treino pequeno para validar o fluxo:
+### Escala inteira
 
-```bash
-PYTHONPATH=src python -m monoobjective_algorithms.tsp.heuristics.neuro_lkh_training \
-  --samples 128 --nodes 10 --epochs 2 --batch-size 16 \
-  --hidden-dim 32 --gcn-layers 3 --output models/neuro_lkh.pt
-```
+O LKH guarda pesos explícitos em inteiro de 32 bits e, em `CreateCandidateSet`, multiplica cada um por `Precision` (100). Antes dessa multiplicação, cada peso fica no máximo em 20_000_000.
 
-O exemplo pequeno nao e uma configuracao de qualidade para producao. O modelo
-treinado com instancias sinteticas pequenas nao tem garantia de generalizacao
-para a instancia real de 250 nos. Para avaliar o uso real, gere um corpus que
-represente a distribuicao das matrizes do projeto e compare rotas e custos com
-baselines.
+Sobre a matriz simétrica `c_ij`:
 
-## Notebook de demonstracao
+- `shift` é o menor custo fora da diagonal, a aresta de acoplamento `-penalty`.
+- `scale = (20_000_000 - 2) / max(c_ij - shift)` para `i ≠ j` (ou 1, se esse máximo é 0).
+- `w_ij = round(scale * (c_ij - shift))` fora da diagonal; a diagonal fica 0.
+- Se o arredondamento deixar um acoplamento tão caro quanto uma transição real, essas transições e as arestas proibidas sobem o suficiente para o acoplamento continuar estritamente mais barato.
+- Uma constante final torna todo peso fora da diagonal pelo menos 1. Ela não muda a ordem entre ciclos que usam a mesma quantidade de cada tipo de aresta.
 
-O notebook [`neuro_lkh_tsp.ipynb`](../../notebooks/neuro_lkh_tsp.ipynb) mostra
-um fluxo autocontido de treino curto, chamada ao Elkai/LKH, validacao da rota e
-comparacao com o rotulo exato em uma instancia sintetica pequena. Ele e
-demonstrativo; nao representa uma configuracao de treino para producao.
+Diferenças menores que cerca de `1 / scale` podem coincidir no inteiro. A penalidade de Jonker-Volgenant domina a amplitude da matriz, então `scale` diminui quando a instância cresce.
 
-## Backend e limitacoes
+## Parâmetros e reprodutibilidade
 
-O backend e o pacote [`elkai`](https://github.com/fikisipi/elkai), que expõe
-LKH 3 em uma extensao C para Python e aceita TSP/ATSP com matriz explicita.
-Ele nao usa SWIG; foi selecionado porque o SWIG upstream do NeuroLKH recebe
-coordenadas EUC_2D e nao aceita as matrizes do projeto. A licenca do Elkai/LKH
-restringe o uso e a distribuicao a fins academicos e nao comerciais. Nao use
-esse backend em um produto comercial sem obter uma licenca adequada.
+- `weight` (número finito em `[0, 1]`, padrão 0.5): peso da unificação. Pode ser definido no construtor ou em `SolveRequest.parameters["weight"]`; o pedido vale só para aquela chamada.
+- `seed` (inteiro ou `None`): mesma validação de `RandomHeuristic`. `None` usa a semente fixa 1234 no processo do LKH. A mesma instância, o mesmo peso e a mesma semente reproduzem a mesma chamada.
+- `lkh_trials` (inteiro positivo, padrão 1000): número de tentativas do LKH.
+- `model_path` existe só no construtor e aponta para o checkpoint. O padrão é `third_party/NeuroLKH/pretrained/neurolkh.pt`.
 
-O PyPI publica wheels do Elkai ate CPython 3.13. No CPython 3.14, a instalacao
-via sdist 2.0.1 falha por uma chave `project.url` invalida no `pyproject.toml`
-do pacote; use um interpretador com wheel disponivel ou uma versao do pacote
-com essa metainformacao corrigida.
+O worker, quando não recebe `weight` nos parâmetros da execução, usa 0.5 se há uma iteração e `(i - 1) / (total - 1)` na iteração `i` quando há mais de uma, cobrindo `[0, 1]`. Um `weight` fixo na execução é repetido em todas as iterações. `seed` e `lkh_trials` são repassados quando estão nos parâmetros da execução.
 
-A rede neste projeto e treinada para custos derivados de matrizes, nao e uma
-reproducao da arquitetura de entrada euclidiana do checkpoint original. A
-heuristica retorna solucoes viaveis, nao prova de otimalidade. A inferencia e
-executada em CPU pelo PyTorch; CUDA e opcional para treinamento.
+## Capacidades e limitações
+
+- Aceita objetivo principal `time` ou `distance`. Os dois custos originais são sempre retornados.
+- Não aceita `objective_limits`. Não serve para ε-restrição.
+- Cada chamada devolve um ciclo, não uma fronteira e não um ótimo garantido.
+- Depende do runtime NeuroLKH em Python 3.11 (`third_party/NeuroLKH/.venv`), da extensão SWIG `_LKH` e do checkpoint pré-treinado. A imagem da API e do worker também é Python 3.11 e fala com esse runtime por um processo local, um processo por chamada. A imagem copia o checkout para `/app/third_party/NeuroLKH` (`NEUROLKH_ROOT`) e cria esse ambiente durante o build. Sem essa cópia, a execução no ParetoLab não encontra o pacote.
+- A rede foi treinada com coordenadas euclidianas. Aqui ela vê um MDS da matriz de custos; a busca do LKH usa a matriz explícita.
+
+## Testes
+
+Os testes ficam em [`tests/monoobjective_algorithms/test_neuro_lkh.py`](../../tests/monoobjective_algorithms/test_neuro_lkh.py). Usam um backend injetado, sem PyTorch e sem SWIG, e cobrem a matriz simétrica da unificação, a decodificação do ciclo, a remoção de arestas proibidas, os custos originais, a reprodutibilidade, a rejeição de pedidos incompatíveis e a falha do backend. O teste do worker em [`tests/worker/test_tasks.py`](../../tests/worker/test_tasks.py) substitui `NeuroLKH` por um solver falso e verifica a persistência e os pesos enviados ao longo das iterações.
