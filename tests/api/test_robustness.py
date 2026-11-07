@@ -106,6 +106,8 @@ def test_robustness_evaluates_the_approximate_front_without_reoptimizing(app: Fl
     assert [item["label"] for item in body["solutions"]] == ["S1", "S2"]
     assert body["solutions"][0]["distance"] == pytest.approx(4)
     assert body["solutions"][0]["nominal_time"] == pytest.approx(10)
+    assert body["solutions"][0]["co2_kg"] is not None
+    assert body["solutions"][0]["total_speed_emission_factor"] is not None
     assert body["solutions"][0]["mean"] == pytest.approx(10)
     assert body["solutions"][1]["nominal_time"] == pytest.approx(6)
     assert body["solutions"][0]["pareto_probability"] == pytest.approx(1)
@@ -120,6 +122,11 @@ def test_robustness_evaluates_the_approximate_front_without_reoptimizing(app: Fl
     ]
     assert "não são reotimizadas" in body["note"]
     assert body["cloud"]["times"]
+
+    restored = app.test_client().get("/api/v1/runs/run_robust/robustness")
+
+    assert restored.status_code == 200
+    assert restored.json == body
 
 
 def test_robustness_uses_the_documented_defaults(app: Flask, monkeypatch) -> None:
@@ -166,6 +173,7 @@ def test_robustness_requires_a_completed_mapping(app: Flask) -> None:
 
     assert response.status_code == 409
     assert response.json["error"]["code"] == "robustness_unavailable"
+    assert app.test_client().get("/api/v1/runs/run_robust/robustness").status_code == 204
 
 
 def test_robustness_reports_missing_instance_and_invalid_parameters(app: Flask) -> None:

@@ -230,12 +230,12 @@
             <ul id="robustness-warnings" class="robustness-warnings" hidden></ul>
             <div id="robustness-results" hidden>
               <div class="robustness-toolbar">
-                <label class="search-box" for="robustness-filter"><span aria-hidden="true">⌕</span><input id="robustness-filter" type="search" placeholder="Filtrar soluções" aria-label="Filtrar soluções da análise de robustez"></label>
-                <p id="robustness-minmax" class="robustness-choice" hidden></p>
+                <label class="search-box" for="robustness-filter"><span aria-hidden="true">⌕</span><input id="robustness-filter" type="search" placeholder="Filtrar soluções" aria-label="Filtrar soluções nas tabelas de análise"></label>
               </div>
+              <h3 class="robustness-section-title">Análise de robustez</h3>
               <div class="quality-table-scroll" id="robustness-table-wrap">
                 <table id="robustness-table" class="quality-table">
-                  <caption class="sr-only">Métricas de robustez e emissão das soluções da fronteira aproximada</caption>
+                  <caption class="sr-only">Métricas de robustez das soluções da fronteira aproximada</caption>
                   <thead></thead>
                   <tbody></tbody>
                 </table>
@@ -252,6 +252,25 @@
                   <canvas class="robustness-chart robustness-chart-dominance" id="robustness-dominance" role="img" aria-label="Mapa da probabilidade de uma solução dominar outra"></canvas>
                 </article>
               </div>
+              <h3 class="robustness-section-title">Análise multicritério</h3>
+              <div class="quality-table-scroll" id="multicriteria-table-wrap">
+                <table id="multicriteria-table" class="quality-table">
+                  <caption class="sr-only">Critérios de distância, tempo nominal, min-max regret e emissões das soluções</caption>
+                  <thead></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <p id="robustness-minmax" class="robustness-choice" hidden></p>
+              <article class="robustness-figure robustness-correlation" id="robustness-figure-correlation">
+                <h3>Correlação entre critérios</h3>
+                <p class="robustness-caption">Correlação de Pearson entre os critérios multicritério; valores de −1 a +1. São usadas as soluções da fronteira analisada. Cinza indica correlação indisponível.</p>
+                <canvas class="robustness-chart robustness-chart-correlation" id="robustness-correlation" role="img" aria-label="Matriz de correlação de Pearson entre distância, tempo nominal, min-max regret, CO2 e fator de emissão de velocidade"></canvas>
+                <table class="sr-only" id="robustness-correlation-data">
+                  <caption>Matriz numérica de correlação entre critérios</caption>
+                  <thead></thead>
+                  <tbody></tbody>
+                </table>
+              </article>
             </div>
           </section>
           <section class="workspace-section" id="documentacao" aria-labelledby="documentation-title">

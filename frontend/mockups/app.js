@@ -767,9 +767,29 @@ async function loadRunResults(runId, offset) {
   applyInstanceSummary(state.instance);
   if (offset === 0 && state.selectedInstanceId) {
     await loadQualityEvolution(state.selectedInstanceId);
+    await loadStoredRobustness(runId);
   }
   if (state.solutions.length) selectSolution(selectedId);
   else renderTable();
+}
+
+async function loadStoredRobustness(runId) {
+  try {
+    const report = await fetchJson(`/runs/${runId}/robustness`);
+    if (!report) return;
+    if (report.run_id !== runId || report.instance_id !== state.selectedInstanceId) {
+      throw new Error('O relatório persistido não corresponde à execução selecionada.');
+    }
+    if (!window.Robustness || !Robustness.show(report, state.emissionsBySolution)) {
+      throw new Error('A resposta da análise multicritério não pôde ser lida.');
+    }
+    state.robustness = report;
+  } catch (error) {
+    const panel = document.querySelector('#robustness-panel');
+    panel.hidden = false;
+    panel.querySelector('#robustness-status').textContent =
+      `Não foi possível recuperar a análise persistida: ${error.message}`;
+  }
 }
 
 async function pollRun(runId) {
@@ -863,17 +883,6 @@ async function startRun() {
   }
 }
 
-function hasEmissionsForSolutions(solutions, emissionsBySolution) {
-  return Array.isArray(solutions) && solutions.every((solution) => {
-    const emission = emissionsBySolution[solution.solution_id];
-    return emission
-      && emission.co2_kg != null
-      && Number.isFinite(Number(emission.co2_kg))
-      && emission.total_speed_emission_factor != null
-      && Number.isFinite(Number(emission.total_speed_emission_factor));
-  });
-}
-
 async function runRobustness() {
   const button = document.querySelector('#robustness-analysis');
   const panel = document.querySelector('#robustness-panel');
@@ -891,41 +900,24 @@ async function runRobustness() {
       method: 'POST',
       body: JSON.stringify({}),
     });
-    if (!window.Robustness || !report.run_id || !Robustness.mapReport(report)) {
+    if (!window.Robustness
+      || !report.run_id
+      || report.run_id !== state.activeRun?.run_id
+      || !Robustness.mapReport(report)) {
       if (panel) {
         panel.hidden = false;
-        panel.querySelector('#robustness-status').textContent = 'A resposta da análise de robustez não pôde ser lida.';
+        panel.querySelector('#robustness-status').textContent =
+          'A resposta da análise não corresponde à última execução selecionada.';
       }
       return;
     }
     state.robustness = report;
-    let emissionsBySolution = state.emissionsBySolution;
-    let emissionError = '';
-    const hasEmissions = hasEmissionsForSolutions(report.solutions, emissionsBySolution);
-    if (state.emissionRunId !== report.run_id || !hasEmissions) {
-      try {
-        const emissions = await fetchJson(`/runs/${report.run_id}/emissions`);
-        emissionsBySolution = EmissionHeatmap.indexBySolution(emissions);
-        state.emissionsBySolution = emissionsBySolution;
-        state.emissionRunId = report.run_id;
-        const isComplete = hasEmissionsForSolutions(report.solutions, emissionsBySolution);
-        if (!isComplete) emissionError = 'A resposta de emissões não contém dados para todas as soluções.';
-      } catch (error) {
-        emissionsBySolution = {};
-        state.emissionsBySolution = {};
-        state.emissionRunId = null;
-        emissionError = `Não foi possível obter as emissões de CO2: ${error.message}`;
-      }
-    }
-    if (!window.Robustness || !Robustness.show(report, emissionsBySolution)) {
+    if (!Robustness.show(report, state.emissionsBySolution)) {
       if (panel) {
         panel.hidden = false;
-        panel.querySelector('#robustness-status').textContent = 'A resposta da análise de robustez não pôde ser lida.';
+        panel.querySelector('#robustness-status').textContent = 'A resposta da análise não pôde ser lida.';
       }
       return;
-    }
-    if (emissionError && panel) {
-      panel.querySelector('#robustness-status').textContent = `Análise concluída. ${emissionError}`;
     }
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     panel.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });

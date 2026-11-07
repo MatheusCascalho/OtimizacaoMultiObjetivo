@@ -9,28 +9,39 @@
   const GRID = '#e4e1d6';
   const NOMINAL = '#d96545';
 
-  const COLUMNS = [
+  const ROBUSTNESS_COLUMNS = [
     { id: 'name', label: 'Solução', numeric: false },
-    { id: 'distance', label: 'Distância', title: 'Distância da rota, em quilômetros' },
-    { id: 'co2Kg', label: 'CO2 (kg)', title: 'Emissão de CO2 calculada para a solução, em quilogramas' },
-    { id: 'speedEmissionFactor', label: 'Fator de emissão de velocidade', title: 'Média dos fatores de velocidade dos arcos, ponderada pela distância' },
-    { id: 'nominal', label: 'Tempo nominal', title: 'Tempo da rota com a matriz nominal, em horas' },
     { id: 'mean', label: 'Média', title: 'Média do tempo simulado, em horas' },
-    { id: 'cv', label: 'CV', title: 'Desvio-padrão dividido pela média do tempo simulado' },
+    { id: 'coefficientOfVariation', label: 'CV', title: 'Desvio-padrão dividido pela média do tempo simulado' },
     { id: 'frontier', label: 'Na fronteira', title: 'Fração dos cenários em que a solução permanece não dominada' },
     { id: 'regretMean', label: 'Regret médio', title: 'Tempo a mais, em média, em relação à melhor solução do mesmo cenário' },
     { id: 'hypervolume', label: 'Δ hipervolume', title: 'Contribuição média ao hipervolume do conjunto em cada cenário' },
+  ];
+  const MULTICRITERIA_COLUMNS = [
+    { id: 'name', label: 'Solução', numeric: false },
+    { id: 'distance', label: 'Distância', title: 'Distância da rota, em quilômetros' },
+    { id: 'nominalTime', label: 'Tempo nominal', title: 'Tempo da rota com a matriz nominal, em horas' },
     {
       id: 'minmax',
-      label: 'Min-max regret',
-      title: 'Pior arrependimento relativo entre distância e tempo. O primeiro percentual usa o regret médio; o segundo, o P95. Menor é melhor.',
+      label: 'Min-Max Regret',
+      title: 'Pior arrependimento relativo entre distância e tempo. Exibe min-max regret da média e do P95, respectivamente; menor é melhor.',
     },
+    { id: 'co2Kg', label: 'CO2 (kg)', title: 'Emissão de CO2 calculada para a solução, em quilogramas' },
+    { id: 'speedEmissionFactor', label: 'Fator de emissão de velocidade', title: 'Média dos fatores de velocidade dos arcos, ponderada pela distância' },
+  ];
+  const CORRELATION_CRITERIA = [
+    { id: 'distance', label: 'Distância' },
+    { id: 'nominalTime', label: 'Tempo nominal' },
+    { id: 'minmax', label: 'Min-Max Regret' },
+    { id: 'co2Kg', label: 'CO2 (kg)' },
+    { id: 'speedEmissionFactor', label: 'Fator de emissão de velocidade' },
   ];
 
   let panel = null;
   let activeReport = null;
   let tableQuery = '';
-  let tableSort = null;
+  let robustnessSort = null;
+  let multicriteriaSort = null;
 
   function canAnalyze({ hasInstance, resultIsDemo, mappedCount, runStatus } = {}) {
     if (!hasInstance || resultIsDemo) return false;
@@ -49,8 +60,9 @@
         label: solution.label || `S${index + 1}`,
         color: COLORS[index % COLORS.length],
         distance: finite(solution.distance),
-        co2Kg: finite(emission && emission.co2_kg),
-        speedEmissionFactor: finite(emission && emission.total_speed_emission_factor),
+        co2Kg: finite(solution.co2_kg) ?? finite(emission && emission.co2_kg),
+        speedEmissionFactor: finite(solution.total_speed_emission_factor)
+          ?? finite(emission && emission.total_speed_emission_factor),
         nominalTime: finite(solution.nominal_time),
         mean: finite(solution.mean),
         coefficientOfVariation: finite(solution.coefficient_of_variation),
@@ -108,26 +120,53 @@
   function tableValues(solution) {
     return [
       solution.name,
-      formatNumber(solution.distance, 2),
-      formatNumber(solution.co2Kg, 2),
-      formatNumber(solution.speedEmissionFactor, 3),
-      formatNumber(solution.nominalTime, 2),
       formatNumber(solution.mean, 2),
       formatNumber(solution.coefficientOfVariation, 3),
       formatPercent(solution.frontier),
       formatNumber(solution.regretMean, 2),
       formatNumber(solution.hypervolume, 3),
+    ];
+  }
+
+  function multicriteriaTableRows(report, options = {}) {
+    return viewMulticriteriaSolutions(report, options).map(multicriteriaTableValues);
+  }
+
+  function multicriteriaTableValues(solution) {
+    return [
+      solution.name,
+      formatNumber(solution.distance, 2),
+      formatNumber(solution.nominalTime, 2),
       formatMinmax(solution),
+      formatNumber(solution.co2Kg, 2),
+      formatNumber(solution.speedEmissionFactor, 3),
     ];
   }
 
   function viewSolutions(report, options = {}) {
     const query = String(options.query || '').trim().toLowerCase();
-    const rows = report.solutions.filter((solution) => tableValues(solution).join(' ').toLowerCase().includes(query));
+    const rows = report.solutions.filter((solution) => solutionMatches(solution, query));
     const sort = options.sort;
-    if (!sort || !COLUMNS.some((column) => column.id === sort.column)) return rows;
+    if (!sort || !ROBUSTNESS_COLUMNS.some((column) => column.id === sort.column)) return rows;
     const direction = sort.direction === 'desc' ? -1 : 1;
     return rows.slice().sort((left, right) => compareSolutions(left, right, sort.column, direction));
+  }
+
+  function viewMulticriteriaSolutions(report, options = {}) {
+    const query = String(options.query || '').trim().toLowerCase();
+    const rows = report.solutions.filter((solution) => solutionMatches(solution, query));
+    const sort = options.sort;
+    if (!sort || !MULTICRITERIA_COLUMNS.some((column) => column.id === sort.column)) return rows;
+    const direction = sort.direction === 'desc' ? -1 : 1;
+    return rows.slice().sort((left, right) => compareSolutions(left, right, sort.column, direction));
+  }
+
+  function solutionMatches(solution, query) {
+    if (!query) return true;
+    return [...tableValues(solution), ...multicriteriaTableValues(solution)]
+      .join(' ')
+      .toLowerCase()
+      .includes(query);
   }
 
   function compareSolutions(left, right, column, direction) {
@@ -141,8 +180,6 @@
   }
 
   function sortValue(solution, column) {
-    if (column === 'nominal') return solution.nominalTime;
-    if (column === 'cv') return solution.coefficientOfVariation;
     if (column === 'minmax') return solution.minmax;
     return solution[column];
   }
@@ -215,20 +252,22 @@
     if (filter) {
       filter.addEventListener('input', () => {
         tableQuery = filter.value;
-        if (activeReport) renderTable(activeReport);
+        if (activeReport) renderTables(activeReport);
       });
     }
-    const table = panel.querySelector('#robustness-table');
-    if (table) {
+    panel.querySelectorAll('#robustness-table, #multicriteria-table').forEach((table) => {
       table.addEventListener('click', (event) => {
         const button = event.target.closest('button[data-column]');
         if (!button || !activeReport) return;
-        const column = button.dataset.column;
-        if (!tableSort || tableSort.column !== column) tableSort = { column, direction: 'asc' };
-        else tableSort = { column, direction: tableSort.direction === 'asc' ? 'desc' : 'asc' };
-        renderTable(activeReport);
+        const sort = table.id === 'robustness-table' ? robustnessSort : multicriteriaSort;
+        const nextSort = !sort || sort.column !== button.dataset.column
+          ? { column: button.dataset.column, direction: 'asc' }
+          : { column: sort.column, direction: sort.direction === 'asc' ? 'desc' : 'asc' };
+        if (table.id === 'robustness-table') robustnessSort = nextSort;
+        else multicriteriaSort = nextSort;
+        renderTables(activeReport);
       });
-    }
+    });
     window.addEventListener('resize', () => {
       if (panel && activeReport && !panel.hidden) drawAll(activeReport);
     });
@@ -239,7 +278,8 @@
     if (!report || !panel) return false;
     activeReport = report;
     tableQuery = '';
-    tableSort = null;
+    robustnessSort = null;
+    multicriteriaSort = null;
     panel.hidden = false;
     const status = panel.querySelector('#robustness-status');
     if (status) status.textContent = describeReport(report);
@@ -251,7 +291,7 @@
     const filter = panel.querySelector('#robustness-filter');
     if (filter) filter.value = '';
     renderWarnings(report);
-    renderTable(report);
+    renderTables(report);
     const results = panel.querySelector('#robustness-results');
     if (results) results.hidden = false;
     drawWhenReady(report, 0);
@@ -265,7 +305,8 @@
     const status = panel.querySelector('#robustness-status');
     if (status) status.textContent = 'A análise ainda não foi executada.';
     tableQuery = '';
-    tableSort = null;
+    robustnessSort = null;
+    multicriteriaSort = null;
     const filter = panel.querySelector('#robustness-filter');
     if (filter) filter.value = '';
     ['#robustness-note', '#robustness-warnings', '#robustness-results']
@@ -287,18 +328,40 @@
     list.hidden = !report.warnings.length;
   }
 
-  function renderTable(report) {
-    const table = panel.querySelector('#robustness-table');
+  function renderTables(report) {
+    renderDataTable(
+      '#robustness-table',
+      ROBUSTNESS_COLUMNS,
+      viewSolutions(report, { query: tableQuery, sort: robustnessSort }),
+      tableValues,
+      preferredMinmax(report.solutions),
+    );
+    renderDataTable(
+      '#multicriteria-table',
+      MULTICRITERIA_COLUMNS,
+      viewMulticriteriaSolutions(report, { query: tableQuery, sort: multicriteriaSort }),
+      multicriteriaTableValues,
+      preferredMinmax(report.solutions),
+    );
     const choice = panel.querySelector('#robustness-minmax');
+    if (choice) {
+      choice.textContent = minmaxNote(report);
+      choice.hidden = !choice.textContent;
+    }
+  }
+
+  function renderDataTable(selector, columns, visible, valuesFor, bestMinmax) {
+    const table = panel.querySelector(selector);
     if (!table) return;
     const head = table.querySelector('thead');
     const body = table.querySelector('tbody');
+    const sort = selector === '#robustness-table' ? robustnessSort : multicriteriaSort;
     const header = document.createElement('tr');
-    COLUMNS.forEach((column) => {
+    columns.forEach((column) => {
       const cell = document.createElement('th');
       cell.scope = 'col';
       if (column.title) cell.title = column.title;
-      const sorted = tableSort && tableSort.column === column.id ? tableSort.direction : null;
+      const sorted = sort && sort.column === column.id ? sort.direction : null;
       cell.setAttribute('aria-sort', sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : 'none');
       const button = document.createElement('button');
       button.type = 'button';
@@ -317,21 +380,19 @@
       header.append(cell);
     });
     head.replaceChildren(header);
-    const visible = viewSolutions(report, { query: tableQuery, sort: tableSort });
-    const best = preferredMinmax(report.solutions);
     body.replaceChildren();
     if (!visible.length) {
       const row = document.createElement('tr');
       const cell = document.createElement('td');
-      cell.colSpan = COLUMNS.length;
+      cell.colSpan = columns.length;
       cell.textContent = 'Nenhuma solução corresponde ao filtro.';
       row.append(cell);
       body.append(row);
     }
     visible.forEach((solution) => {
       const row = document.createElement('tr');
-      if (best != null && solution.minmax === best) row.className = 'is-minmax';
-      tableValues(solution).forEach((value, index) => {
+      if (bestMinmax != null && solution.minmax === bestMinmax) row.className = 'is-minmax';
+      valuesFor(solution).forEach((value, index) => {
         const cell = document.createElement(index === 0 ? 'th' : 'td');
         if (index === 0) {
           cell.scope = 'row';
@@ -342,10 +403,6 @@
       });
       body.append(row);
     });
-    if (choice) {
-      choice.textContent = minmaxNote(report);
-      choice.hidden = !choice.textContent;
-    }
   }
 
   function preferredMinmax(solutions) {
@@ -364,6 +421,7 @@
     const states = [
       ['robustness-figure-box', drawBoxplot(panel.querySelector('#robustness-box'), report)],
       ['robustness-figure-dominance', drawDominance(panel.querySelector('#robustness-dominance'), report)],
+      ['robustness-figure-correlation', drawCorrelation(panel.querySelector('#robustness-correlation'), report)],
     ];
     states.forEach(([id, state]) => toggleFigure(id, state));
     return states.some(([, state]) => state === 'pending');
@@ -372,6 +430,140 @@
   function toggleFigure(id, state) {
     const figure = panel.querySelector(`#${id}`);
     if (figure) figure.hidden = state === 'unsupported';
+  }
+
+  function correlationMatrix(report) {
+    return CORRELATION_CRITERIA.map((rowCriterion) => CORRELATION_CRITERIA.map((columnCriterion) => {
+      const pairs = report.solutions
+        .map((solution) => [solution[rowCriterion.id], solution[columnCriterion.id]])
+        .filter(([left, right]) => Number.isFinite(left) && Number.isFinite(right));
+      if (pairs.length < 2) return null;
+      const leftMean = pairs.reduce((sum, pair) => sum + pair[0], 0) / pairs.length;
+      const rightMean = pairs.reduce((sum, pair) => sum + pair[1], 0) / pairs.length;
+      const covariance = pairs.reduce(
+        (sum, pair) => sum + (pair[0] - leftMean) * (pair[1] - rightMean),
+        0,
+      );
+      const leftVariance = pairs.reduce((sum, pair) => sum + (pair[0] - leftMean) ** 2, 0);
+      const rightVariance = pairs.reduce((sum, pair) => sum + (pair[1] - rightMean) ** 2, 0);
+      if (leftVariance === 0 || rightVariance === 0) return null;
+      return Math.max(-1, Math.min(1, covariance / Math.sqrt(leftVariance * rightVariance)));
+    }));
+  }
+
+  function drawCorrelation(canvas, report) {
+    const fitted = fitCanvas(canvas);
+    if (!fitted) return 'pending';
+    const { ctx, width, height } = fitted;
+    const matrix = correlationMatrix(report);
+    renderCorrelationTable(matrix);
+    const count = CORRELATION_CRITERIA.length;
+    const pad = { left: 92, right: 12, top: 12, bottom: 86 };
+    const cell = Math.min((width - pad.left - pad.right) / count, (height - pad.top - pad.bottom) / count);
+    if (cell < 14 || !matrix.some((row) => row.some((value) => value != null))) {
+      ctx.fillStyle = MUTED;
+      ctx.font = '12px "DM Sans", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Correlação indisponível: são necessárias variações em pelo menos dois critérios.', width / 2, height / 2);
+      return 'drawn';
+    }
+
+    ctx.font = '9px "IBM Plex Mono", ui-monospace, monospace';
+    ctx.textBaseline = 'middle';
+    CORRELATION_CRITERIA.forEach((criterion, index) => {
+      const y = pad.top + index * cell + cell / 2;
+      ctx.fillStyle = INK;
+      ctx.textAlign = 'right';
+      ctx.fillText(correlationLabel(criterion.id), pad.left - 7, y);
+      CORRELATION_CRITERIA.forEach((column, columnIndex) => {
+        const value = matrix[index][columnIndex];
+        const x = pad.left + columnIndex * cell;
+        const yCell = pad.top + index * cell;
+        ctx.fillStyle = value == null ? '#ebe9e1' : correlationColor(value);
+        ctx.fillRect(x, yCell, cell - 1, cell - 1);
+        if (value != null && cell >= 25) {
+          ctx.fillStyle = INK;
+          ctx.textAlign = 'center';
+          ctx.fillText(formatNumber(value, 2), x + cell / 2, y + 1);
+        }
+      });
+    });
+
+    CORRELATION_CRITERIA.forEach((criterion, index) => {
+      ctx.save();
+      ctx.translate(pad.left + index * cell + cell / 2, pad.top + count * cell + 7);
+      ctx.rotate(-Math.PI / 3);
+      ctx.fillStyle = INK;
+      ctx.textAlign = 'right';
+      ctx.fillText(correlationLabel(criterion.id), 0, 0);
+      ctx.restore();
+    });
+
+    const legendY = height - 19;
+    const legendWidth = Math.min(150, width - 32);
+    const legendX = (width - legendWidth) / 2;
+    for (let step = 0; step < 15; step += 1) {
+      const value = -1 + step / 7;
+      ctx.fillStyle = correlationColor(Math.min(1, value));
+      ctx.fillRect(legendX + step * legendWidth / 15, legendY, legendWidth / 15 + 1, 8);
+    }
+    ctx.fillStyle = MUTED;
+    ctx.font = '9px "IBM Plex Mono", ui-monospace, monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('−1', legendX, legendY + 18);
+    ctx.textAlign = 'center';
+    ctx.fillText('0', width / 2, legendY + 18);
+    ctx.textAlign = 'right';
+    ctx.fillText('+1', legendX + legendWidth, legendY + 18);
+    return 'drawn';
+  }
+
+  function renderCorrelationTable(matrix) {
+    const table = panel.querySelector('#robustness-correlation-data');
+    if (!table) return;
+    const header = document.createElement('tr');
+    const corner = document.createElement('th');
+    corner.scope = 'col';
+    corner.textContent = 'Critério';
+    header.append(corner);
+    CORRELATION_CRITERIA.forEach((criterion) => {
+      const cell = document.createElement('th');
+      cell.scope = 'col';
+      cell.textContent = criterion.label;
+      header.append(cell);
+    });
+    table.querySelector('thead').replaceChildren(header);
+    const body = table.querySelector('tbody');
+    body.replaceChildren(...CORRELATION_CRITERIA.map((criterion, index) => {
+      const row = document.createElement('tr');
+      const label = document.createElement('th');
+      label.scope = 'row';
+      label.textContent = criterion.label;
+      row.append(label);
+      matrix[index].forEach((value) => {
+        const cell = document.createElement('td');
+        cell.textContent = value == null ? 'Indisponível' : formatNumber(value, 3);
+        row.append(cell);
+      });
+      return row;
+    }));
+  }
+
+  function correlationLabel(id) {
+    return {
+      distance: 'Distância',
+      nominalTime: 'Tempo nominal',
+      minmax: 'Min-Max',
+      co2Kg: 'CO2 (kg)',
+      speedEmissionFactor: 'Fator vel.',
+    }[id];
+  }
+
+  function correlationColor(value) {
+    return value < 0
+      ? mix('#4777a8', '#f5f4ee', 1 + value)
+      : mix('#f5f4ee', '#d96545', value);
   }
 
   function drawBoxplot(canvas, report) {
@@ -608,11 +800,16 @@
   }
 
   return {
-    COLUMNS,
+    COLUMNS: ROBUSTNESS_COLUMNS,
+    ROBUSTNESS_COLUMNS,
+    MULTICRITERIA_COLUMNS,
     canAnalyze,
     mapReport,
     tableRows,
+    multicriteriaTableRows,
     viewSolutions,
+    viewMulticriteriaSolutions,
+    correlationMatrix,
     minmaxNote,
     describeReport,
     inversionNote,

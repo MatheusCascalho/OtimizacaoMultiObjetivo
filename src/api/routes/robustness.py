@@ -8,7 +8,13 @@ from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from infrastructure.persistence.postgres.models import CityLayout, Instance, Run, RunSolution
+from infrastructure.persistence.postgres.models import (
+    CityLayout,
+    Instance,
+    Run,
+    RunRobustnessAnalysis,
+    RunSolution,
+)
 from multiobjective_algorithms import analyze_robustness, non_dominated_mask
 from multiobjective_algorithms.robustness import (
     RobustnessReport,
@@ -16,6 +22,7 @@ from multiobjective_algorithms.robustness import (
     SolutionRobustness,
     parameters_as_mapping,
 )
+from optimization_problems.tsp.emission import EmissionError, evaluate_route_emission
 
 
 robustness_blueprint = Blueprint("robustness", __name__, url_prefix="/api/v1")
@@ -120,7 +127,50 @@ def analyze_instance_robustness(instance_id: str):
         return _error("invalid_robustness", str(error), 422)
 
     warnings = _objective_warnings(front, report)
-    return jsonify(_payload(instance_id, run_id, front, report, warnings)), 200
+    payload = _payload(instance_id, run_id, front, report, warnings)
+    try:
+        for solution_row, solution_payload in zip(front, payload["solutions"]):
+            emission = evaluate_route_emission(
+                solution_row.route,
+                distance_matrix,
+                time_matrix,
+                close_cycle=True,
+            )
+            solution_payload["co2_kg"] = emission["co2_kg"]
+            solution_payload["total_speed_emission_factor"] = emission["total_speed_emission_factor"]
+    except EmissionError as error:
+        return _error("invalid_route", str(error), 422)
+
+    with Session(engine) as session:
+        stored = session.get(RunRobustnessAnalysis, run_id)
+        if stored is None:
+            session.add(
+                RunRobustnessAnalysis(
+                    run_id=run_id,
+                    instance_id=instance_id,
+                    payload=payload,
+                )
+            )
+        else:
+            stored.instance_id = instance_id
+            stored.payload = payload
+        session.commit()
+
+    return jsonify(payload), 200
+
+
+@robustness_blueprint.get("/runs/<run_id>/robustness")
+def get_run_robustness(run_id: str):
+    engine = current_app.extensions["paretolab_database_engine"]
+    with Session(engine) as session:
+        run = session.get(Run, run_id)
+        if run is None:
+            return _error("run_not_found", "A execução solicitada não existe.", 404)
+        analysis = session.get(RunRobustnessAnalysis, run_id)
+        if analysis is None:
+            return "", 204
+        payload = analysis.payload
+    return jsonify(payload), 200
 
 
 def _request_parameters() -> tuple[dict | None, tuple | None]:
