@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, DateTime, Float, Integer, String
+from sqlalchemy import JSON, DateTime, Float, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from infrastructure.persistence.postgres.base import Base
@@ -21,6 +21,30 @@ class RunSolution(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
+
+
+class RunAttemptSample(Base):
+    """One sampling attempt, in the order needed to rebuild round prefixes.
+
+    The mapped frontier stays in ``run_solutions``. These rows keep the
+    attempt index and the objectives of every call, including repeated routes.
+    """
+
+    __tablename__ = "run_attempt_samples"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "round_index",
+            "attempt_index",
+            name="uq_run_attempt_samples_position",
+        ),
+    )
+
+    sample_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    run_id: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    round_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempt_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    objective_values: Mapped[dict] = mapped_column(JSON, nullable=False)
 
 
 class Notification(Base):

@@ -1,50 +1,65 @@
-"""Evolution of hypervolume and spread along a non-exact run.
+"""Evolution of hypervolume and spread inside each sampling round.
 
-The mapped sample stores one candidate frontier per ``round``. Attempt-level
-frontiers and per-evaluation snapshots are not persisted, so the round index
-is the iteration axis. Both indicators reuse the run-level utopian point and
-nadir already used by the final hypervolume: each instant is normalized with
-that same reference, not with the nadir of the instant itself.
+Each point is the candidate frontier of an accumulated prefix of that round:
+the first 10 attempts, then the first 20, and so on. The last point is the
+full round. A round with fewer than 10 attempts has a single point, at its
+total. The utopian point, the nadir and the spread extremes belong to the
+whole execution and stay fixed for every prefix. Dominance is recomputed on
+the prefix; a dominance flag stored at the end of the round is not used.
 
-Up to ten moments are kept. They are the iterations nearest to
-``k * total / 10`` for ``k = 1..10``, with halves rounding toward the larger
-index. A run with fewer than ten iterations keeps every existing iteration.
-An exact method is one the catalog marks as exact, or, when the catalog is
-silent, a run that delivers a single frontier.
+Attempts without a persisted order are not part of this series. Callers must
+not invent that order from solution identifiers.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 from statistics import fmean
 from typing import Mapping, Sequence
 
-from multiobjective_algorithms.hypervolume import summarize_run_hypervolume
-from multiobjective_algorithms.reference_points import ObjectiveSpec
-from multiobjective_algorithms.spread import summarize_run_spread
+from multiobjective_algorithms.dominance import non_dominated_mask
+from multiobjective_algorithms.hypervolume import (
+    hypervolume_2d,
+    shift_reference_point,
+)
+from multiobjective_algorithms.reference_points import (
+    ObjectiveSpec,
+    ReferencePointError,
+    estimate_reference_points,
+    normalize_objectives,
+)
+from multiobjective_algorithms.spread import spread_delta
 
-MOMENT_COUNT = 10
-ITERATION_AXIS = "iteration"
+PREFIX_STEP = 10
+ACCUMULATED_SAMPLES_AXIS = "accumulated_samples"
 
 
 @dataclass(frozen=True)
 class IndicatorSample:
-    iteration: int
+    accumulated_samples: int
     hypervolume: float
     spread: float
+
+
+@dataclass(frozen=True)
+class RoundIndicatorSeries:
+    round_index: int
+    samples: tuple[IndicatorSample, ...]
 
 
 @dataclass(frozen=True)
 class RunIndicatorTrack:
     algorithm_id: str
     configuration: tuple[tuple[str, object], ...]
+    round_index: int
     samples: tuple[IndicatorSample, ...]
     exact: bool
 
 
 @dataclass(frozen=True)
 class MeanPoint:
-    iteration: float
+    accumulated_samples: float
     hypervolume: float
     spread: float
 
@@ -53,52 +68,30 @@ class MeanPoint:
 class MeanCurve:
     algorithm_id: str
     configuration: tuple[tuple[str, object], ...]
+    round_index: int
     points: tuple[MeanPoint, ...]
 
 
-def sample_iteration_indices(total: int, moments: int = MOMENT_COUNT) -> list[int]:
-    """Return 1-based positions equally spaced from the first fraction through the end.
+def accumulated_prefix_sizes(total: int, step: int = PREFIX_STEP) -> list[int]:
+    """Prefix lengths of one round, in blocks of ``step`` attempts.
 
-    ``total`` below ``moments`` yields ``1..total`` and does not invent
-    positions. Otherwise each position is the integer nearest to
-    ``step * total / moments``, and a tie rounds toward the larger index.
+    A total below ``step`` is a single prefix of that total. Otherwise the
+    lengths are ``step, 2 * step, ...`` and the full total when it is not a
+    multiple of ``step``.
     """
 
     if isinstance(total, bool) or not isinstance(total, int) or total < 0:
         raise ValueError("total must be a non-negative integer")
-    if isinstance(moments, bool) or not isinstance(moments, int) or moments < 1:
-        raise ValueError("moments must be a positive integer")
+    if isinstance(step, bool) or not isinstance(step, int) or step < 1:
+        raise ValueError("step must be a positive integer")
     if total == 0:
         return []
-    if total <= moments:
-        return list(range(1, total + 1))
-
-    used: set[int] = set()
-    chosen: list[int] = []
-    for step in range(1, moments + 1):
-        index = (2 * step * total + moments) // (2 * moments)
-        index = min(total, max(1, index))
-        if index in used:
-            index = _nearest_free_index(index, used, total)
-        used.add(index)
-        chosen.append(index)
-    return chosen
-
-
-def select_iteration_moments(
-    iterations: Sequence[int],
-    moments: int = MOMENT_COUNT,
-) -> list[int]:
-    """Pick up to ``moments`` iteration labels from the values that exist.
-
-    Labels are the stored round indices. Positions come from
-    :func:`sample_iteration_indices` over the sorted unique labels, so a
-    contiguous run of 100 iterations is sampled at 10, 20, …, 100.
-    """
-
-    ordered = sorted(_valid_iterations(iterations))
-    positions = sample_iteration_indices(len(ordered), moments)
-    return [ordered[position - 1] for position in positions]
+    if total < step:
+        return [total]
+    sizes = list(range(step, total + 1, step))
+    if sizes[-1] != total:
+        sizes.append(total)
+    return sizes
 
 
 def is_exact_execution(distinct_rounds: int, catalog_exact: bool | None = None) -> bool:
@@ -128,78 +121,107 @@ def configuration_key(parameters: Mapping[str, object] | None) -> tuple[tuple[st
 def measure_run_indicators(
     samples: Sequence[Mapping[str, object]],
     objectives: Sequence[ObjectiveSpec],
-    moments: int = MOMENT_COUNT,
-) -> tuple[IndicatorSample, ...]:
-    """Hypervolume and Δ at the sampled rounds of one execution.
+    step: int = PREFIX_STEP,
+) -> tuple[RoundIndicatorSeries, ...]:
+    """Hypervolume and Δ of each accumulated prefix, one series per round.
 
-    Both summaries see the whole sample, so the utopian point, the nadir and
-    the spread extremes belong to the execution rather than to each instant.
+    ``samples`` are individual attempts. Each one needs ``round``, ``attempt``
+    starting at 1, and the objective values. Attempts are ordered by that
+    index. A missing attempt is rejected instead of using the sequence order.
+    The reference and the spread extremes come from every attempt of the
+    execution.
     """
 
-    hypervolume = summarize_run_hypervolume(samples, objectives)
-    spread = summarize_run_spread(samples, objectives)
-    area_by_round = {item.round_index: item.hypervolume for item in hypervolume.rounds}
-    spread_by_round = {item.round_index: item.spread for item in spread.rounds}
-    if set(area_by_round) != set(spread_by_round):
-        raise ValueError("hipervolume e espalhamento divergiram nas rodadas")
-    selected = select_iteration_moments(tuple(area_by_round), moments)
-    return tuple(
-        IndicatorSample(
-            iteration=iteration,
-            hypervolume=area_by_round[iteration],
-            spread=spread_by_round[iteration],
-        )
-        for iteration in selected
+    specs = tuple(objectives)
+    if len(specs) != 2 or len({spec.id for spec in specs}) != 2:
+        raise ValueError("A evolução deste mapa exige exatamente 2 objetivos.")
+    if not samples:
+        raise ReferencePointError("Não há amostragens mapeadas para calcular a evolução.")
+
+    parsed = [_parse_attempt(sample, specs) for sample in samples]
+    seen: set[tuple[int, int]] = set()
+    for round_index, attempt, _values in parsed:
+        key = (round_index, attempt)
+        if key in seen:
+            raise ValueError("attempt must be unique inside the round")
+        seen.add(key)
+
+    reference = estimate_reference_points(
+        [{spec.id: values[index] for index, spec in enumerate(specs)} for _, _, values in parsed],
+        specs,
     )
+    directions = [spec.direction for spec in specs]
+    normalized_reference = shift_reference_point(normalize_objectives(reference.nadir, reference))
+    extremes = _execution_extremes(
+        [normalize_objectives(values, reference) for _, _, values in parsed]
+    )
+
+    grouped: dict[int, list[tuple[int, tuple[float, ...]]]] = {}
+    for round_index, attempt, values in parsed:
+        grouped.setdefault(round_index, []).append((attempt, values))
+
+    series: list[RoundIndicatorSeries] = []
+    for round_index in sorted(grouped):
+        ordered = [values for _attempt, values in sorted(grouped[round_index], key=lambda item: item[0])]
+        measured: list[IndicatorSample] = []
+        for size in accumulated_prefix_sizes(len(ordered), step):
+            prefix = ordered[:size]
+            mask = non_dominated_mask(prefix, directions)
+            front = [
+                normalize_objectives(point, reference)
+                for point, keep in zip(prefix, mask)
+                if keep
+            ]
+            measured.append(
+                IndicatorSample(
+                    accumulated_samples=size,
+                    hypervolume=hypervolume_2d(front, normalized_reference),
+                    spread=spread_delta(front, extremes),
+                )
+            )
+        series.append(RoundIndicatorSeries(round_index, tuple(measured)))
+    return tuple(series)
 
 
 def aggregate_quality_evolution(tracks: Sequence[RunIndicatorTrack]) -> tuple[MeanCurve, ...]:
-    """Mean indicator at each aligned tenth of comparable executions.
+    """Mean indicator of comparable executions at the same round and prefix.
 
-    Tracks marked exact are omitted. Sample ``k`` of an execution that kept
-    ``m`` moments stands for the fraction ``k / m`` and joins the tenth
-    nearest to that fraction. A tie goes to the later tenth. The point's
-    iteration is the mean of the iteration labels in that tenth, and each
-    indicator is the mean of the values. A tenth that no execution reached
-    is omitted, so a short execution does not invent moments. Two executions
-    sampled in ten moments therefore line up 1st-with-1st through 10th-with-10th,
-    and the last moment of a shorter execution lines up with the last tenth.
+    Tracks marked exact are omitted. Executions share a curve when they use
+    the same algorithm and the same parameters, ignoring the seed, and the
+    mean is taken only at a shared round and prefix length. A prefix that
+    only one execution reached keeps that execution's value. One execution
+    therefore produces its own curves, one per round.
     """
 
-    grouped: dict[tuple[str, tuple[tuple[str, object], ...]], list[RunIndicatorTrack]] = {}
+    grouped: dict[tuple[str, tuple[tuple[str, object], ...], int], list[RunIndicatorTrack]] = {}
     for track in tracks:
         if track.exact or not track.samples:
             continue
-        grouped.setdefault((track.algorithm_id, track.configuration), []).append(track)
+        grouped.setdefault((track.algorithm_id, track.configuration, track.round_index), []).append(track)
 
     curves: list[MeanCurve] = []
-    for algorithm_id, configuration in sorted(grouped, key=lambda item: (item[0], repr(item[1]))):
-        members = grouped[(algorithm_id, configuration)]
-        buckets: dict[int, list[IndicatorSample]] = {slot: [] for slot in range(1, MOMENT_COUNT + 1)}
-        for member in members:
-            used: set[int] = set()
-            count = len(member.samples)
-            for index, sample in enumerate(member.samples, start=1):
-                slot = _fraction_slot(index, count, MOMENT_COUNT)
-                if slot in used:
-                    slot = _nearest_free_index(slot, used, MOMENT_COUNT)
-                used.add(slot)
-                buckets[slot].append(sample)
-        points = [
+    for algorithm_id, configuration, round_index in sorted(
+        grouped,
+        key=lambda item: (item[0], repr(item[1]), item[2]),
+    ):
+        buckets: dict[int, list[IndicatorSample]] = {}
+        for member in grouped[(algorithm_id, configuration, round_index)]:
+            for sample in member.samples:
+                buckets.setdefault(sample.accumulated_samples, []).append(sample)
+        points = tuple(
             MeanPoint(
-                iteration=fmean(sample.iteration for sample in buckets[slot]),
-                hypervolume=fmean(sample.hypervolume for sample in buckets[slot]),
-                spread=fmean(sample.spread for sample in buckets[slot]),
+                accumulated_samples=size,
+                hypervolume=fmean(sample.hypervolume for sample in buckets[size]),
+                spread=fmean(sample.spread for sample in buckets[size]),
             )
-            for slot in range(1, MOMENT_COUNT + 1)
-            if buckets[slot]
-        ]
-        curves.append(MeanCurve(algorithm_id, configuration, tuple(points)))
+            for size in sorted(buckets)
+        )
+        curves.append(MeanCurve(algorithm_id, configuration, round_index, points))
     return tuple(curves)
 
 
 def stable_number(value: float) -> int | float:
-    """Emit an integer when the mean landed on a whole iteration."""
+    """Emit an integer when the mean landed on a whole number of samples."""
 
     numeric = float(value)
     nearest = round(numeric)
@@ -208,33 +230,44 @@ def stable_number(value: float) -> int | float:
     return numeric
 
 
-def _valid_iterations(iterations: Sequence[int]) -> set[int]:
-    valid: set[int] = set()
-    for iteration in iterations:
-        if isinstance(iteration, bool) or not isinstance(iteration, int) or iteration < 1:
-            raise ValueError("iteration must be an integer starting at 1")
-        valid.add(iteration)
-    return valid
+def _parse_attempt(
+    sample: Mapping[str, object],
+    specs: Sequence[ObjectiveSpec],
+) -> tuple[int, int, tuple[float, ...]]:
+    round_index = sample.get("round")
+    attempt = sample.get("attempt")
+    if isinstance(round_index, bool) or not isinstance(round_index, int) or round_index < 1:
+        raise ValueError("round must be an integer starting at 1")
+    if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
+        raise ValueError("attempt must be an integer starting at 1")
+    try:
+        values = tuple(_finite_objective(sample[spec.id]) for spec in specs)
+    except KeyError as error:
+        raise ValueError("Os objetivos da execução não coincidem com o catálogo do problema.") from error
+    return round_index, attempt, values
 
 
-def _fraction_slot(index: int, count: int, moments: int) -> int:
-    """1-based tenth nearest to ``index / count``. Ties move to the later tenth."""
+def _finite_objective(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("objective values must be finite real numbers")
+    numeric = float(value)
+    if not isfinite(numeric):
+        raise ValueError("objective values must be finite real numbers")
+    return numeric
 
-    if count == moments:
-        return index
-    slot = (2 * index * moments + count) // (2 * count)
-    return min(moments, max(1, slot))
 
+def _execution_extremes(
+    points: Sequence[tuple[float, float]],
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Best normalized point of each objective, matching the Δ reference.
 
-def _nearest_free_index(index: int, used: set[int], total: int) -> int:
-    for distance in range(1, total + 1):
-        higher = index + distance
-        lower = index - distance
-        if higher <= total and higher not in used:
-            return higher
-        if lower >= 1 and lower not in used:
-            return lower
-    raise ValueError("não há instante livre para amostrar")
+    The first extreme minimizes the first objective; the second minimizes the
+    second. Ties keep the other objective smaller, as in the run-level Δ.
+    """
+
+    extreme_f1 = min(points, key=lambda point: (point[0], point[1]))
+    extreme_f2 = min(points, key=lambda point: (point[1], point[0]))
+    return extreme_f1, extreme_f2
 
 
 def _freeze(value: object) -> object:

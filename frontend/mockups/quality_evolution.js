@@ -19,8 +19,14 @@
     cross: 'marcador cruz',
   };
 
+  function pointField(axis) {
+    if (axis === 'evaluations') return 'evaluations';
+    if (axis === 'accumulated_samples') return 'accumulated_samples';
+    return 'iteration';
+  }
+
   function mapCurves(curves, axis) {
-    const field = axis === 'evaluations' ? 'evaluations' : 'iteration';
+    const field = pointField(axis);
     return (curves || []).map((curve) => {
       const points = (curve.points || []).map((point) => ({
         x: Number(point[field]),
@@ -41,13 +47,20 @@
     if (!hypervolume || !spread || !Array.isArray(hypervolume.curves) || !Array.isArray(spread.curves)) {
       return null;
     }
-    const axis = payload.axis === 'evaluations' ? 'evaluations' : 'iteration';
-    const fallbackLabel = axis === 'evaluations' ? 'Avaliações' : 'Iterações';
+    const axis = payload.axis === 'evaluations' || payload.axis === 'accumulated_samples'
+      ? payload.axis
+      : 'iteration';
+    const fallbackLabel = axis === 'evaluations'
+      ? 'Avaliações'
+      : axis === 'accumulated_samples'
+        ? 'Amostragens acumuladas na rodada'
+        : 'Iterações';
     return {
       axis,
       axisLabel: typeof payload.axis_label === 'string' && payload.axis_label
         ? payload.axis_label
         : fallbackLabel,
+      emptyMessage: typeof payload.empty_message === 'string' ? payload.empty_message : '',
       hypervolume: mapCurves(hypervolume.curves, axis),
       spread: mapCurves(spread.curves, axis),
     };
@@ -77,7 +90,9 @@
   }
 
   function qualityEvolutionFigures(mapped, options) {
-    const emptyMessage = (options && options.emptyMessage) || EMPTY_MESSAGE;
+    const emptyMessage = (options && options.emptyMessage)
+      || (mapped && mapped.emptyMessage)
+      || EMPTY_MESSAGE;
     const axisLabel = mapped && mapped.axisLabel ? mapped.axisLabel : 'Iterações';
     return [
       buildFigure(
@@ -141,6 +156,15 @@
     return `${figure.title}. ${curves}. Eixo horizontal: ${figure.xLabel}. Eixo vertical: ${figure.yLabel}.`;
   }
 
+  function chartExpansionState(expanded) {
+    const isExpanded = Boolean(expanded);
+    return {
+      expanded: isExpanded,
+      label: isExpanded ? 'Recolher gráfico' : 'Ampliar gráfico',
+      ariaPressed: isExpanded ? 'true' : 'false',
+    };
+  }
+
   function paddedRange(values) {
     let min = Math.min(...values);
     let max = Math.max(...values);
@@ -194,10 +218,9 @@
     context.stroke();
   }
 
-  function drawFigure(context, figure, width, height) {
-    context.clearRect(0, 0, width, height);
+  function figureGeometry(figure, width, height) {
     const curves = (figure && figure.curves) || [];
-    if (!curves.length || !(width > 2) || !(height > 2)) return [];
+    if (!curves.length || !(width > 2) || !(height > 2)) return { points: [] };
     const inset = { left: 36, right: 12, top: 12, bottom: 22 };
     const xs = curves.flatMap((curve) => curve.points.map((point) => point.x));
     const ys = curves.flatMap((curve) => curve.points.map((point) => point.mean));
@@ -207,6 +230,66 @@
     const plotHeight = Math.max(height - inset.top - inset.bottom, 1);
     const xOf = (value) => inset.left + ((value - xRange.min) / (xRange.max - xRange.min)) * plotWidth;
     const yOf = (value) => inset.top + ((yRange.max - value) / (yRange.max - yRange.min)) * plotHeight;
+    const points = [];
+    curves.forEach((curve, curveIndex) => {
+      curve.points.forEach((point, pointIndex) => {
+        points.push({
+          curveIndex,
+          pointIndex,
+          label: curve.label,
+          color: curve.color,
+          xValue: point.x,
+          mean: point.mean,
+          px: xOf(point.x),
+          py: yOf(point.mean),
+        });
+      });
+    });
+    return {
+      inset,
+      xRange,
+      yRange,
+      plotWidth,
+      plotHeight,
+      xOf,
+      yOf,
+      points,
+    };
+  }
+
+  function nearestEvolutionPoint(points, x, y, radius = 14) {
+    const limit = radius * radius;
+    let best = null;
+    let bestDistance = limit;
+    (points || []).forEach((point) => {
+      const dx = point.px - x;
+      const dy = point.py - y;
+      const distance = (dx * dx) + (dy * dy);
+      if (distance <= bestDistance) {
+        best = point;
+        bestDistance = distance;
+      }
+    });
+    return best;
+  }
+
+  function hoverDetail(hit, figure) {
+    if (!hit || !figure) return null;
+    return {
+      title: hit.label,
+      lines: [
+        `${figure.xLabel}: ${formatTick(hit.xValue)}`,
+        `${figure.yLabel}: ${formatTick(hit.mean)}`,
+      ],
+    };
+  }
+
+  function drawFigure(context, figure, width, height, hover) {
+    context.clearRect(0, 0, width, height);
+    const curves = (figure && figure.curves) || [];
+    const geometry = figureGeometry(figure, width, height);
+    if (!geometry.points.length) return [];
+    const { inset, xRange, yRange, plotWidth, plotHeight, xOf, yOf } = geometry;
 
     context.font = '9px "IBM Plex Mono", monospace';
     context.textBaseline = 'middle';
@@ -238,7 +321,7 @@
     }
 
     const painted = [];
-    curves.forEach((curve) => {
+    curves.forEach((curve, curveIndex) => {
       context.beginPath();
       curve.points.forEach((point, index) => {
         const x = xOf(point.x);
@@ -251,8 +334,21 @@
       context.setLineDash(curve.dash);
       context.stroke();
       context.setLineDash([]);
-      curve.points.forEach((point) => {
-        drawMarker(context, curve.marker, xOf(point.x), yOf(point.mean), curve.color);
+      curve.points.forEach((point, pointIndex) => {
+        const px = xOf(point.x);
+        const py = yOf(point.mean);
+        const selected = hover
+          && hover.curveIndex === curveIndex
+          && hover.pointIndex === pointIndex;
+        if (selected) {
+          context.beginPath();
+          context.arc(px, py, 8, 0, Math.PI * 2);
+          context.strokeStyle = '#e5b94f';
+          context.lineWidth = 2;
+          context.setLineDash([]);
+          context.stroke();
+        }
+        drawMarker(context, curve.marker, px, py, curve.color);
       });
       painted.push({
         label: curve.label,
@@ -272,6 +368,10 @@
     qualityEvolutionFigures,
     legendEntries,
     figureDescription,
+    chartExpansionState,
+    figureGeometry,
+    nearestEvolutionPoint,
+    hoverDetail,
     drawFigure,
   };
 });

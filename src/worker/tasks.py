@@ -15,6 +15,7 @@ from infrastructure.persistence.postgres.models import (
     InstanceFile,
     Notification,
     Run,
+    RunAttemptSample,
     RunSolution,
     TemporaryUpload,
 )
@@ -22,7 +23,7 @@ from infrastructure.object_storage.s3.client import create_s3_client
 from infrastructure.object_storage.s3.storage import S3ObjectStorage
 from infrastructure.persistence.postgres.database import create_engine
 from monoobjective_algorithms.interfaces import SolveRequest
-from monoobjective_algorithms.tsp.heuristics import NeuroLKH
+from monoobjective_algorithms.tsp.heuristics import NeuroLKH, RandomHeuristic
 from multiobjective_algorithms.dominance import non_dominated_mask
 from optimization_problems.tsp import TSPInstance
 from workflow_instance.domain.frontier_sampling import (
@@ -35,6 +36,16 @@ from workflow_instance.domain.matrices import parse_matrix_csv
 
 
 logger = logging.getLogger(__name__)
+
+_SUPPORTED_ALGORITHMS = frozenset({"neuro-lkh", "random-heuristic"})
+
+
+def _build_solver(algorithm_id: str, seed: int | None):
+    if algorithm_id == "neuro-lkh":
+        return NeuroLKH(seed=seed)
+    if algorithm_id == "random-heuristic":
+        return RandomHeuristic(seed=seed)
+    raise ValueError(f"O algoritmo '{algorithm_id}' não está disponível para esta execução.")
 
 
 @shared_task(name="worker.ping")
@@ -183,9 +194,20 @@ def execute_run_with_dependencies(run_id: str, engine, object_storage) -> str:
         ).all()
         run_parameters = dict(run.parameters or {})
         instance_id = run.instance_id
+        algorithm_id = run.algorithm_id
         iterations = _positive_int(run_parameters.get("iterations"), DEFAULT_ITERATIONS)
         repetitions = _positive_int(run_parameters.get("repetitions"), FRONTIER_REPETITIONS)
         total = total_attempts(iterations, repetitions)
+        if algorithm_id not in _SUPPORTED_ALGORITHMS:
+            run.status = "failed"
+            run.error_message = (
+                f"O algoritmo '{algorithm_id}' não está disponível para esta execução."
+            )
+            run.finished_at = datetime.now(UTC)
+            run.updated_at = run.finished_at
+            _set_instance_status(session, run.instance_id, "failed", run.updated_at)
+            session.commit()
+            return run_id
         if instance is None or len(files) != 2:
             run.status = "failed"
             run.error_message = "Os dados de entrada da instância não estão disponíveis."
@@ -209,10 +231,11 @@ def execute_run_with_dependencies(run_id: str, engine, object_storage) -> str:
         instance_data = TSPInstance(time_matrix=time_matrix, distance_matrix=distance_matrix)
         seed = run_parameters.get("seed")
         base_seed = seed if isinstance(seed, int) and not isinstance(seed, bool) else None
-        solver = NeuroLKH(seed=base_seed)
+        solver = _build_solver(algorithm_id, base_seed)
         progress_interval = max(1, ceil(total / 20))
         sampled_rounds: list[list[dict]] = []
         attempt_timings: list[dict] = []
+        attempt_samples: list[dict] = []
 
         for round_index in range(1, repetitions + 1):
             unique_solutions: dict[tuple[int, ...], dict] = {}
@@ -230,11 +253,13 @@ def execute_run_with_dependencies(run_id: str, engine, object_storage) -> str:
                             session.commit()
                         return run_id
 
-                parameters = {"weight": _neuro_lkh_weight(run_parameters, attempt, iterations)}
+                parameters: dict = {}
+                if algorithm_id == "neuro-lkh":
+                    parameters["weight"] = _neuro_lkh_weight(run_parameters, attempt, iterations)
+                    if "lkh_trials" in run_parameters:
+                        parameters["lkh_trials"] = run_parameters["lkh_trials"]
                 if attempt_seed is not None:
                     parameters["seed"] = attempt_seed
-                if "lkh_trials" in run_parameters:
-                    parameters["lkh_trials"] = run_parameters["lkh_trials"]
                 started = perf_counter()
                 result = solver.solve(
                     instance_data,
@@ -245,6 +270,13 @@ def execute_run_with_dependencies(run_id: str, engine, object_storage) -> str:
                     raise RuntimeError("A heurística não retornou uma rota factível.")
                 attempt_timings.append(
                     {"round": round_index, "attempt": attempt, "duration_ms": duration_ms}
+                )
+                attempt_samples.append(
+                    {
+                        "round": round_index,
+                        "attempt": attempt,
+                        "objective_values": dict(result.objective_values),
+                    }
                 )
                 unique_solutions.setdefault(
                     tuple(result.solution.route),
@@ -310,6 +342,16 @@ def execute_run_with_dependencies(run_id: str, engine, object_storage) -> str:
                         dominance=solution["dominance"],
                         round_index=solution["round_index"],
                         created_at=now,
+                    )
+                )
+            for sample in attempt_samples:
+                session.add(
+                    RunAttemptSample(
+                        sample_id=f"smp_{uuid4().hex}",
+                        run_id=run_id,
+                        round_index=sample["round"],
+                        attempt_index=sample["attempt"],
+                        objective_values=sample["objective_values"],
                     )
                 )
             current_run.status = "completed"

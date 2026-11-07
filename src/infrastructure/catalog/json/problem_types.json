@@ -42,10 +42,22 @@
         {
           "id": "random-heuristic",
           "name": "RandomHeuristic",
-          "description": "Aproxima a fronteira por amostragem. Cada execução repete o mapeamento 5 vezes; iterations é o número de amostragens de cada rodada.",
+          "method": "heuristic",
+          "description": "Aproxima a fronteira por amostragem uniforme de rotas. Cada execução repete o mapeamento 5 vezes; iterations é o número de amostragens de cada rodada.",
           "parameters": [
             {"id": "iterations", "type": "integer", "default": 50, "minimum": 1, "maximum": 100000},
             {"id": "seed", "type": "integer", "required": false}
+          ]
+        },
+        {
+          "id": "neuro-lkh",
+          "name": "NeuroLKH",
+          "method": "heuristic",
+          "description": "Aproxima a fronteira com o NeuroLKH. Cada amostragem da rodada usa um peso diferente entre tempo e distância. iterations é o número de amostragens de cada rodada.",
+          "parameters": [
+            {"id": "iterations", "type": "integer", "default": 50, "minimum": 1, "maximum": 100000},
+            {"id": "seed", "type": "integer", "required": false},
+            {"id": "lkh_trials", "type": "integer", "default": 1000, "minimum": 1}
           ]
         }
       ],

@@ -9,7 +9,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from api.pagination import get_pagination_args
-from infrastructure.persistence.postgres.models import CityLayout, Instance, Notification, Run, RunSolution
+from infrastructure.persistence.postgres.models import (
+    CityLayout,
+    Instance,
+    Notification,
+    Run,
+    RunAttemptSample,
+    RunSolution,
+)
 from multiobjective_algorithms import (
     ObjectiveSpec,
     ReferencePointError,
@@ -22,7 +29,7 @@ from multiobjective_algorithms import (
     summarize_run_spread,
 )
 from multiobjective_algorithms.quality_evolution import (
-    ITERATION_AXIS,
+    ACCUMULATED_SAMPLES_AXIS,
     MeanCurve,
     RunIndicatorTrack,
     stable_number,
@@ -362,7 +369,10 @@ def get_run_reference_points(run_id: str):
     return jsonify(payload), 200
 
 
-def _reference_objectives(problem_type: dict, rows: list[RunSolution]) -> tuple[ObjectiveSpec, ...]:
+def _reference_objectives(
+    problem_type: dict,
+    rows: list[RunSolution] | list[RunAttemptSample],
+) -> tuple[ObjectiveSpec, ...]:
     catalog = problem_type.get("objectives") or []
     catalog_ids = [item["id"] for item in catalog]
     if len(catalog_ids) != 2 or len(set(catalog_ids)) != 2:
@@ -540,43 +550,88 @@ def get_instance_quality_evolution(instance_id: str):
             select(Run).where(Run.instance_id == instance_id, Run.status == "completed")
         ).all()
         rows = session.scalars(
-            select(RunSolution).where(RunSolution.run_id.in_([run.run_id for run in runs]))
+            select(RunAttemptSample).where(RunAttemptSample.run_id.in_([run.run_id for run in runs]))
         ).all() if runs else []
-        solutions_by_run: dict[str, list[RunSolution]] = {}
+        samples_by_run: dict[str, list[RunAttemptSample]] = {}
         for row in rows:
-            solutions_by_run.setdefault(row.run_id, []).append(row)
+            samples_by_run.setdefault(row.run_id, []).append(row)
         try:
-            tracks = [
-                _quality_track(run, solutions_by_run.get(run.run_id, []), problem_type)
-                for run in runs
-            ]
-            tracks = [track for track in tracks if track is not None]
+            tracks: list[RunIndicatorTrack] = []
+            for run in runs:
+                tracks.extend(
+                    _quality_tracks(run, samples_by_run.get(run.run_id, []), problem_type)
+                )
             curves = aggregate_quality_evolution(tracks)
         except ReferencePointError as error:
             details = [{"stage": error.stage}] if error.stage else []
             return _error("quality_evolution_unavailable", str(error), 409, details)
         except ValueError as error:
             return _error("invalid_quality_evolution", str(error), 422)
-        payload = _quality_evolution_payload(instance.instance_id, problem_type, curves)
+        payload = _quality_evolution_payload(
+            instance.instance_id,
+            problem_type,
+            curves,
+            _evolution_empty_message(runs, samples_by_run, problem_type, curves),
+        )
     return jsonify(payload), 200
 
 
-def _quality_track(run: Run, rows: list[RunSolution], problem_type: dict) -> RunIndicatorTrack | None:
+def _quality_tracks(
+    run: Run,
+    rows: list[RunAttemptSample],
+    problem_type: dict,
+) -> list[RunIndicatorTrack]:
+    """Prefix curves for one execution.
+
+    Rows without an attempt index are not read from ``run_solutions``. A run
+    that never stored sampling order contributes nothing.
+    """
+
     if not rows:
-        return None
+        return []
     distinct_rounds = {row.round_index for row in rows}
     if is_exact_execution(len(distinct_rounds), _catalog_exact(problem_type, run.algorithm_id)):
-        return None
+        return []
     objectives = _reference_objectives(problem_type, rows)
-    samples = measure_run_indicators(
-        [{"round": row.round_index, **(row.objective_values or {})} for row in rows],
+    measured = measure_run_indicators(
+        [
+            {"round": row.round_index, "attempt": row.attempt_index, **(row.objective_values or {})}
+            for row in rows
+        ],
         objectives,
     )
-    return RunIndicatorTrack(
-        algorithm_id=run.algorithm_id,
-        configuration=configuration_key(run.parameters),
-        samples=samples,
-        exact=False,
+    configuration = configuration_key(run.parameters)
+    return [
+        RunIndicatorTrack(
+            algorithm_id=run.algorithm_id,
+            configuration=configuration,
+            round_index=series.round_index,
+            samples=series.samples,
+            exact=False,
+        )
+        for series in measured
+    ]
+
+
+def _evolution_empty_message(
+    runs: list[Run],
+    samples_by_run: dict[str, list[RunAttemptSample]],
+    problem_type: dict,
+    curves: tuple[MeanCurve, ...],
+) -> str | None:
+    if curves:
+        return None
+    pending = [
+        run
+        for run in runs
+        if not samples_by_run.get(run.run_id)
+        and _catalog_exact(problem_type, run.algorithm_id) is False
+    ]
+    if not pending:
+        return None
+    return (
+        "As execuções concluídas não guardam a ordem das amostragens. "
+        "A curva por prefixo aparece nas próximas execuções."
     )
 
 
@@ -594,58 +649,69 @@ def _catalog_exact(problem_type: dict, algorithm_id: str) -> bool | None:
     return None
 
 
-def _quality_evolution_payload(instance_id: str, problem_type: dict, curves: tuple[MeanCurve, ...]) -> dict:
+def _quality_evolution_payload(
+    instance_id: str,
+    problem_type: dict,
+    curves: tuple[MeanCurve, ...],
+    empty_message: str | None,
+) -> dict:
     names = {
         item["id"]: item.get("name")
         for item in problem_type.get("algorithms") or []
         if item.get("id")
     }
-    counts: dict[str, int] = {}
+    configurations: dict[str, set[tuple[tuple[str, object], ...]]] = {}
     for curve in curves:
-        counts[curve.algorithm_id] = counts.get(curve.algorithm_id, 0) + 1
+        configurations.setdefault(curve.algorithm_id, set()).add(curve.configuration)
 
     def curve_payload(curve: MeanCurve, value_name: str) -> dict:
         return {
             "algorithm_id": curve.algorithm_id,
-            "label": _evolution_label(curve, names, counts[curve.algorithm_id] > 1),
+            "round": curve.round_index,
+            "label": _evolution_label(
+                curve,
+                names,
+                len(configurations.get(curve.algorithm_id, ())) > 1,
+            ),
             "points": [
                 {
-                    "iteration": stable_number(point.iteration),
+                    "accumulated_samples": stable_number(point.accumulated_samples),
                     "mean": stable_number(getattr(point, value_name)),
                 }
                 for point in curve.points
             ],
         }
 
-    return {
+    payload = {
         "instance_id": instance_id,
-        "axis": ITERATION_AXIS,
-        "axis_label": "Iterações",
+        "axis": ACCUMULATED_SAMPLES_AXIS,
+        "axis_label": "Amostragens acumuladas na rodada",
         "space": "normalized_objectives",
         "hypervolume": {"curves": [curve_payload(curve, "hypervolume") for curve in curves]},
         "spread": {"curves": [curve_payload(curve, "spread") for curve in curves]},
         "note": (
-            "Cada curva é a média entre execuções não exatas da mesma instância, algoritmo e parâmetros, "
-            "sem contar a semente. O eixo horizontal é a rodada armazenada, tratada como iteração, "
-            "porque a fronteira candidata só existe por rodada. "
-            "Há no máximo 10 instantes, os mais próximos de cada décimo até o fim; "
-            "com menos de 10 rodadas entram todas. "
-            "Se as execuções tiverem tamanhos diferentes, o k-ésimo de 10 alinha a mesma fração do avanço "
-            "e a abscissa é a média das iterações nesse décimo. "
-            "O utópico e o nadir são os da execução inteira."
+            "Cada curva é uma rodada. O eixo horizontal é o número de amostragens acumuladas "
+            "nessa rodada: blocos de 10, e o último ponto é o prefixo completo. "
+            "Com menos de 10 amostragens há um único ponto, no total da rodada. "
+            "A média junta execuções do mesmo algoritmo e dos mesmos parâmetros, na mesma rodada "
+            "e no mesmo tamanho de prefixo, sem contar a semente. "
+            "O utópico, o nadir e os extremos do espalhamento são os da execução inteira. "
+            "Execuções antigas, sem a ordem das amostragens, não entram neste gráfico."
         ),
     }
+    if empty_message:
+        payload["empty_message"] = empty_message
+    return payload
 
 
 def _evolution_label(curve: MeanCurve, names: dict[str, object], distinguish_configuration: bool) -> str:
     raw_name = names.get(curve.algorithm_id)
     name = raw_name.strip() if isinstance(raw_name, str) and raw_name.strip() else curve.algorithm_id
-    if not distinguish_configuration:
-        return name
-    details = _configuration_label(curve.configuration)
-    if not details:
-        return name
-    return f"{name} · {details}"
+    details = _configuration_label(curve.configuration) if distinguish_configuration else ""
+    round_label = f"rodada {curve.round_index}"
+    if details:
+        return f"{name} · {details} · {round_label}"
+    return f"{name} · {round_label}"
 
 
 def _configuration_label(configuration: tuple[tuple[str, object], ...]) -> str:

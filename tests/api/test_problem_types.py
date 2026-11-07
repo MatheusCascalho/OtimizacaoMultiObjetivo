@@ -47,16 +47,32 @@ def test_get_problem_type_includes_objectives_and_supported_algorithm() -> None:
         {"id": "time", "name": "Tempo", "unit": "h", "direction": "minimize"},
         {"id": "distance", "name": "Distância", "unit": "km", "direction": "minimize"},
     ]
-    assert [algorithm["id"] for algorithm in response.json["algorithms"]] == [
-        "random-heuristic"
+    algorithms = response.json["algorithms"]
+    assert [algorithm["id"] for algorithm in algorithms] == [
+        "random-heuristic",
+        "neuro-lkh",
     ]
-    assert response.json["algorithms"][0]["parameters"][0] == {
+    assert algorithms[0]["name"] == "RandomHeuristic"
+    assert algorithms[0]["method"] == "heuristic"
+    assert [parameter["id"] for parameter in algorithms[0]["parameters"]] == [
+        "iterations",
+        "seed",
+    ]
+    assert algorithms[0]["parameters"][0] == {
         "id": "iterations",
         "type": "integer",
         "default": 50,
         "minimum": 1,
         "maximum": 100000,
     }
+    assert algorithms[1]["name"] == "NeuroLKH"
+    assert algorithms[1]["method"] == "heuristic"
+    assert [parameter["id"] for parameter in algorithms[1]["parameters"]] == [
+        "iterations",
+        "seed",
+        "lkh_trials",
+    ]
+    assert "weight" not in {parameter["id"] for parameter in algorithms[0]["parameters"]}
     app.extensions["paretolab_database_engine"].dispose()
 
 

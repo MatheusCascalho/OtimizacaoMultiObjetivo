@@ -113,6 +113,32 @@ def test_create_instance_links_valid_uploads_and_returns_ready_status(app: Flask
     assert instance.node_count == 2
 
 
+def test_create_instance_accepts_neuro_lkh(app: Flask) -> None:
+    with Session(app.extensions["paretolab_database_engine"]) as session:
+        time_upload_id, distance_upload_id = _seed_uploads(session)
+
+    response = app.test_client().post(
+        "/api/v1/instances",
+        json={
+            "problem_type_id": "tsp-time-distance",
+            "name": "Instância NeuroLKH",
+            "files": {
+                "time_matrix": time_upload_id,
+                "distance_matrix": distance_upload_id,
+            },
+            "node_order_confirmed": True,
+            "configuration": {
+                "preview": ["weighted_graph", "matrix_heatmap"],
+                "result_views": ["pareto_frontier", "solutions_table"],
+                "algorithm_id": "neuro-lkh",
+            },
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json["algorithm_id"] == "neuro-lkh"
+
+
 def test_create_instance_rejects_mismatched_upload_sizes(app: Flask) -> None:
     with Session(app.extensions["paretolab_database_engine"]) as session:
         time_upload_id, _ = _seed_uploads(session, time_node_count=2, distance_node_count=3)

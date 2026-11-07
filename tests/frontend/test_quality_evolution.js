@@ -148,6 +148,67 @@ test('empty evolution explains that no non-exact execution is available', () => 
   assert.equal(evolutionApi.drawFigure(mockContext(), figures[0], 320, 180).length, 0);
 });
 
+test('accumulated samples become the horizontal axis when the payload says so', () => {
+  const mapped = evolutionApi.mapApiQualityEvolution({
+    axis: 'accumulated_samples',
+    axis_label: 'Amostragens acumuladas na rodada',
+    empty_message: 'As execuções concluídas não guardam a ordem das amostragens.',
+    hypervolume: { curves: [] },
+    spread: { curves: [] },
+  });
+  const figures = evolutionApi.qualityEvolutionFigures(mapped);
+
+  assert.equal(figures[0].xLabel, 'Amostragens acumuladas na rodada');
+  assert.match(figures[0].emptyMessage, /ordem das amostragens/);
+  assert.equal(figures[1].xLabel, figures[0].xLabel);
+});
+
+test('prefix points use the accumulated sample count', () => {
+  const mapped = evolutionApi.mapApiQualityEvolution({
+    axis: 'accumulated_samples',
+    axis_label: 'Amostragens acumuladas na rodada',
+    hypervolume: {
+      curves: [
+        {
+          algorithm_id: 'neuro-lkh',
+          label: 'NeuroLKH · rodada 1',
+          points: [
+            { accumulated_samples: 10, mean: 0.2 },
+            { accumulated_samples: 20, mean: 0.4 },
+          ],
+        },
+        {
+          algorithm_id: 'neuro-lkh',
+          label: 'NeuroLKH · rodada 2',
+          points: [{ accumulated_samples: 10, mean: 0.5 }],
+        },
+      ],
+    },
+    spread: {
+      curves: [
+        {
+          algorithm_id: 'neuro-lkh',
+          label: 'NeuroLKH · rodada 1',
+          points: [{ accumulated_samples: 10, mean: 0.1 }],
+        },
+        {
+          algorithm_id: 'neuro-lkh',
+          label: 'NeuroLKH · rodada 2',
+          points: [{ accumulated_samples: 10, mean: 0.3 }],
+        },
+      ],
+    },
+  });
+  const figures = evolutionApi.qualityEvolutionFigures(mapped);
+
+  assert.deepEqual(figures[0].curves.map((curve) => curve.label), [
+    'NeuroLKH · rodada 1',
+    'NeuroLKH · rodada 2',
+  ]);
+  assert.deepEqual(figures[0].curves[0].points.map((point) => point.x), [10, 20]);
+  assert.equal(figures[1].curves[1].points[0].mean, 0.3);
+});
+
 test('evaluations become the horizontal axis when the payload says so', () => {
   const mapped = evolutionApi.mapApiQualityEvolution({
     axis: 'evaluations',
@@ -170,6 +231,58 @@ test('evaluations become the horizontal axis when the payload says so', () => {
   assert.equal(figures[1].curves[0].points[0].mean, 0.4);
 });
 
+test('hover hits the nearest marker and describes the point', () => {
+  const figures = evolutionApi.qualityEvolutionFigures(evolutionApi.mapApiQualityEvolution({
+    axis: 'accumulated_samples',
+    axis_label: 'Amostragens acumuladas na rodada',
+    hypervolume: {
+      curves: [
+        {
+          algorithm_id: 'neuro-lkh',
+          label: 'NeuroLKH · rodada 1',
+          points: [
+            { accumulated_samples: 10, mean: 0.2 },
+            { accumulated_samples: 20, mean: 0.8 },
+          ],
+        },
+      ],
+    },
+    spread: { curves: [] },
+  }));
+  const geometry = evolutionApi.figureGeometry(figures[0], 400, 200);
+  const first = geometry.points[0];
+  const second = geometry.points[1];
+
+  assert.equal(evolutionApi.nearestEvolutionPoint(geometry.points, first.px, first.py).pointIndex, 0);
+  assert.equal(evolutionApi.nearestEvolutionPoint(geometry.points, first.px + 80, first.py + 80), null);
+  const span = Math.hypot(first.px - second.px, first.py - second.py);
+  const nearerSecond = {
+    x: second.px + ((first.px - second.px) * 6) / span,
+    y: second.py + ((first.py - second.py) * 6) / span,
+  };
+  assert.equal(evolutionApi.nearestEvolutionPoint(geometry.points, nearerSecond.x, nearerSecond.y).pointIndex, 1);
+
+  const detail = evolutionApi.hoverDetail(second, figures[0]);
+  assert.equal(detail.title, 'NeuroLKH · rodada 1');
+  assert.deepEqual(detail.lines, [
+    'Amostragens acumuladas na rodada: 20',
+    'Média do hipervolume: 0.80',
+  ]);
+});
+
+test('expansion toggles the chart control label', () => {
+  assert.deepEqual(evolutionApi.chartExpansionState(false), {
+    expanded: false,
+    label: 'Ampliar gráfico',
+    ariaPressed: 'false',
+  });
+  assert.deepEqual(evolutionApi.chartExpansionState(true), {
+    expanded: true,
+    label: 'Recolher gráfico',
+    ariaPressed: 'true',
+  });
+});
+
 test('the served dashboard includes the evolution script', () => {
   const root = path.join(__dirname, '../..');
   const html = fs.readFileSync(path.join(root, 'frontend/mockups/index.html'), 'utf8');
@@ -177,6 +290,13 @@ test('the served dashboard includes the evolution script', () => {
   const devCompose = fs.readFileSync(path.join(root, 'compose-dev.yaml'), 'utf8');
 
   assert.match(html, /<script src="quality_evolution\.js"/);
+  assert.match(html, /class="quality-evolution-chart" id="hv-evolution-chart"/);
+  assert.match(html, /class="quality-evolution-chart" id="spread-evolution-chart"/);
+  assert.match(html, /id="hv-evolution-expand"/);
+  assert.match(html, /id="spread-evolution-expand"/);
+  assert.match(html, /id="hv-evolution-tooltip"/);
+  assert.match(html, /id="spread-evolution-tooltip"/);
+  assert.match(html, /Ampliar gráfico/);
   assert.match(dockerfile, /quality_evolution\.js/);
   assert.match(devCompose, /quality_evolution\.js:\/usr\/share\/nginx\/html\/quality_evolution\.js/);
 

@@ -2,14 +2,16 @@ import pytest
 
 from multiobjective_algorithms import (
     ObjectiveSpec,
+    accumulated_prefix_sizes,
     aggregate_quality_evolution,
     configuration_key,
+    estimate_reference_points,
+    hypervolume_2d,
     is_exact_execution,
     measure_run_indicators,
-    sample_iteration_indices,
-    select_iteration_moments,
-    summarize_run_hypervolume,
-    summarize_run_spread,
+    non_dominated_mask,
+    normalize_objectives,
+    shift_reference_point,
 )
 from multiobjective_algorithms.quality_evolution import (
     IndicatorSample,
@@ -22,139 +24,185 @@ OBJECTIVES = (
 )
 
 
-def test_one_hundred_iterations_are_sampled_at_each_tenth() -> None:
-    assert sample_iteration_indices(100) == list(range(10, 101, 10))
-    assert select_iteration_moments(range(1, 101)) == list(range(10, 101, 10))
+def _attempt(round_index: int, attempt: int, time: float, distance: float) -> dict:
+    return {
+        "round": round_index,
+        "attempt": attempt,
+        "time": time,
+        "distance": distance,
+    }
 
-    samples = [
-        {"round": index, "time": float(index), "distance": float(101 - index)}
-        for index in range(1, 101)
+
+def _prefix_hypervolume(samples: list[dict], round_index: int, size: int) -> float:
+    reference = estimate_reference_points(
+        [{"time": sample["time"], "distance": sample["distance"]} for sample in samples],
+        OBJECTIVES,
+    )
+    normalized_reference = shift_reference_point(normalize_objectives(reference.nadir, reference))
+    ordered = sorted(
+        (sample for sample in samples if sample["round"] == round_index),
+        key=lambda sample: sample["attempt"],
+    )[:size]
+    points = [(sample["time"], sample["distance"]) for sample in ordered]
+    mask = non_dominated_mask(points, ("minimize", "minimize"))
+    front = [
+        normalize_objectives(point, reference)
+        for point, keep in zip(points, mask)
+        if keep
     ]
+    return hypervolume_2d(front, normalized_reference)
+
+
+def test_prefix_lengths_follow_blocks_of_ten() -> None:
+    assert accumulated_prefix_sizes(50) == [10, 20, 30, 40, 50]
+    assert accumulated_prefix_sizes(25) == [10, 20, 25]
+    assert accumulated_prefix_sizes(10) == [10]
+    assert accumulated_prefix_sizes(7) == [7]
+    assert accumulated_prefix_sizes(0) == []
+
+
+def test_fifty_attempts_keep_every_tenth_and_two_rounds_stay_separate() -> None:
+    samples = [
+        _attempt(round_index, attempt, float(attempt + round_index), float(60 - attempt))
+        for round_index in (1, 2)
+        for attempt in range(1, 51)
+    ]
+
+    measured = measure_run_indicators(samples, OBJECTIVES)
+    curves = aggregate_quality_evolution(
+        [
+            RunIndicatorTrack(
+                "neuro-lkh",
+                configuration_key({"iterations": 50, "repetitions": 5, "seed": 1}),
+                series.round_index,
+                series.samples,
+                exact=False,
+            )
+            for series in measured
+        ]
+    )
+
+    assert [series.round_index for series in measured] == [1, 2]
+    assert [item.accumulated_samples for item in measured[0].samples] == [10, 20, 30, 40, 50]
+    assert [curve.round_index for curve in curves] == [1, 2]
+    assert [point.accumulated_samples for point in curves[0].points] == [10, 20, 30, 40, 50]
+
+
+def test_prefix_of_ten_excludes_the_eleventh_attempt_even_when_it_is_listed_first() -> None:
+    first_ten = [
+        _attempt(1, attempt, float(attempt), float(12 - attempt))
+        for attempt in range(1, 11)
+    ]
+    eleventh = _attempt(1, 11, 3.0, 3.0)
+    samples = [eleventh, *first_ten]
+
     measured = measure_run_indicators(samples, OBJECTIVES)
 
-    assert [item.iteration for item in measured] == list(range(10, 101, 10))
+    assert [item.accumulated_samples for item in measured[0].samples] == [10, 11]
+    assert measured[0].samples[0].hypervolume == pytest.approx(_prefix_hypervolume(samples, 1, 10))
+    assert measured[0].samples[1].hypervolume == pytest.approx(_prefix_hypervolume(samples, 1, 11))
+    assert measured[0].samples[0].hypervolume != pytest.approx(measured[0].samples[1].hypervolume)
+    assert measured[0].samples[0].spread != pytest.approx(measured[0].samples[1].spread)
 
 
-def test_a_total_that_is_not_a_multiple_of_ten_uses_the_nearest_indices() -> None:
-    assert sample_iteration_indices(25) == [3, 5, 8, 10, 13, 15, 18, 20, 23, 25]
-    for total in range(1, 121):
-        indices = sample_iteration_indices(total)
-        assert indices == sorted(set(indices))
-        assert indices[0] >= 1
-        assert indices[-1] == total
-        assert len(indices) == min(total, 10)
+def test_prefix_uses_the_reference_of_the_whole_execution() -> None:
+    round_one = [_attempt(1, attempt, float(attempt), float(12 - attempt)) for attempt in range(1, 11)]
+    wider = round_one + [_attempt(2, 1, 0.0, 20.0), _attempt(2, 2, 20.0, 0.0)]
+
+    alone = measure_run_indicators(round_one, OBJECTIVES)
+    combined = measure_run_indicators(wider, OBJECTIVES)
+
+    assert combined[0].samples[0].hypervolume == pytest.approx(_prefix_hypervolume(wider, 1, 10))
+    assert combined[0].samples[0].hypervolume != pytest.approx(alone[0].samples[0].hypervolume)
+    assert combined[0].samples[0].spread != pytest.approx(alone[0].samples[0].spread)
 
 
-def test_fewer_than_ten_iterations_returns_every_existing_iteration() -> None:
-    assert sample_iteration_indices(0) == []
-    assert sample_iteration_indices(4) == [1, 2, 3, 4]
-    assert select_iteration_moments([2, 4, 7]) == [2, 4, 7]
-    assert len(sample_iteration_indices(4)) == 4
+def test_a_missing_attempt_index_is_rejected() -> None:
+    with pytest.raises(ValueError, match="attempt"):
+        measure_run_indicators(
+            [{"round": 1, "time": 1.0, "distance": 2.0}],
+            OBJECTIVES,
+        )
 
 
-def test_indicator_sample_uses_the_nadir_of_the_whole_execution() -> None:
-    early = [
-        {"round": 1, "time": 1.0, "distance": 3.0},
-        {"round": 1, "time": 3.0, "distance": 1.0},
-    ]
-    whole = early + [
-        {"round": 2, "time": 0.0, "distance": 6.0},
-        {"round": 2, "time": 6.0, "distance": 0.0},
-    ]
-
-    early_only = measure_run_indicators(early, OBJECTIVES)
-    combined = measure_run_indicators(whole, OBJECTIVES)
-    hypervolume = summarize_run_hypervolume(whole, OBJECTIVES)
-    spread = summarize_run_spread(whole, OBJECTIVES)
-
-    assert combined[0].hypervolume != pytest.approx(early_only[0].hypervolume)
-    assert combined[0].hypervolume == pytest.approx(hypervolume.rounds[0].hypervolume)
-    assert combined[1].spread == pytest.approx(spread.rounds[1].spread)
-    assert [item.iteration for item in combined] == [1, 2]
-
-
-def test_mean_of_two_executions_at_the_same_instant() -> None:
+def test_mean_of_two_executions_at_the_same_round_and_prefix() -> None:
     key = configuration_key({"iterations": 50, "repetitions": 5, "seed": 1})
     assert key == configuration_key({"iterations": 50, "repetitions": 5, "seed": 99})
-    tracks = [
-        RunIndicatorTrack(
-            "random-heuristic",
-            key,
-            (IndicatorSample(10, 0.2, 0.1), IndicatorSample(20, 0.4, 0.3)),
-            exact=False,
-        ),
-        RunIndicatorTrack(
-            "random-heuristic",
-            key,
-            (IndicatorSample(10, 0.4, 0.3), IndicatorSample(20, 0.8, 0.5)),
-            exact=False,
-        ),
-    ]
+    curves = aggregate_quality_evolution(
+        [
+            RunIndicatorTrack(
+                "neuro-lkh",
+                key,
+                1,
+                (IndicatorSample(10, 0.2, 0.1), IndicatorSample(20, 0.4, 0.3)),
+                exact=False,
+            ),
+            RunIndicatorTrack(
+                "neuro-lkh",
+                key,
+                1,
+                (IndicatorSample(10, 0.4, 0.3), IndicatorSample(20, 0.8, 0.5)),
+                exact=False,
+            ),
+            RunIndicatorTrack(
+                "neuro-lkh",
+                key,
+                2,
+                (IndicatorSample(10, 1.0, 0.2),),
+                exact=False,
+            ),
+        ]
+    )
 
-    curves = aggregate_quality_evolution(tracks)
-
-    assert len(curves) == 1
-    assert curves[0].algorithm_id == "random-heuristic"
-    assert curves[0].points[0].iteration == pytest.approx(10)
+    assert [curve.round_index for curve in curves] == [1, 2]
+    assert curves[0].points[0].accumulated_samples == pytest.approx(10)
     assert curves[0].points[0].hypervolume == pytest.approx(0.3)
     assert curves[0].points[0].spread == pytest.approx(0.2)
-    assert curves[0].points[1].iteration == pytest.approx(20)
     assert curves[0].points[1].hypervolume == pytest.approx(0.6)
-    assert curves[0].points[1].spread == pytest.approx(0.4)
+    assert curves[1].points[0].hypervolume == pytest.approx(1.0)
 
 
-def test_executions_of_different_length_align_by_fraction() -> None:
-    long_run = tuple(IndicatorSample(10 * step, float(step), 0.1) for step in range(1, 11))
-    short_run = tuple(IndicatorSample(5 * step, 0.0, 0.5) for step in range(1, 11))
-    five_run = tuple(IndicatorSample(step, 0.0, 0.0) for step in range(1, 6))
-    full_run = tuple(IndicatorSample(10 * step, 2.0, 2.0) for step in range(1, 11))
-    key = configuration_key({"iterations": 50})
-
-    paired = aggregate_quality_evolution(
+def test_a_prefix_reached_by_only_one_execution_keeps_that_value() -> None:
+    key = configuration_key({"iterations": 20})
+    curves = aggregate_quality_evolution(
         [
-            RunIndicatorTrack("random-heuristic", key, long_run, exact=False),
-            RunIndicatorTrack("random-heuristic", key, short_run, exact=False),
-        ]
-    )
-    uneven = aggregate_quality_evolution(
-        [
-            RunIndicatorTrack("random-heuristic", key, five_run, exact=False),
-            RunIndicatorTrack("random-heuristic", key, full_run, exact=False),
-        ]
-    )
-    short_only = aggregate_quality_evolution(
-        [
-            RunIndicatorTrack("random-heuristic", key, five_run, exact=False),
+            RunIndicatorTrack(
+                "random-heuristic",
+                key,
+                1,
+                (IndicatorSample(10, 0.2, 0.4),),
+                exact=False,
+            ),
+            RunIndicatorTrack(
+                "random-heuristic",
+                key,
+                1,
+                (IndicatorSample(10, 0.6, 0.8), IndicatorSample(20, 0.9, 0.1)),
+                exact=False,
+            ),
         ]
     )
 
-    assert paired[0].points[0].iteration == pytest.approx(7.5)
-    assert paired[0].points[0].hypervolume == pytest.approx(0.5)
-    assert paired[0].points[9].iteration == pytest.approx(75)
-    assert len(uneven[0].points) == 10
-    assert uneven[0].points[0].iteration == pytest.approx(10)
-    assert uneven[0].points[0].hypervolume == pytest.approx(2)
-    assert uneven[0].points[1].iteration == pytest.approx((1 + 20) / 2)
-    assert uneven[0].points[1].hypervolume == pytest.approx(1)
-    assert uneven[0].points[9].iteration == pytest.approx((5 + 100) / 2)
-    assert uneven[0].points[9].hypervolume == pytest.approx(1)
-    assert len(short_only[0].points) == 5
-    assert [point.iteration for point in short_only[0].points] == [1, 2, 3, 4, 5]
+    assert [point.accumulated_samples for point in curves[0].points] == [10, 20]
+    assert curves[0].points[0].hypervolume == pytest.approx(0.4)
+    assert curves[0].points[1].hypervolume == pytest.approx(0.9)
 
 
-def test_an_exact_method_does_not_enter_the_mean_curve() -> None:
+def test_an_exact_method_does_not_enter_the_curves() -> None:
     key = configuration_key({"iterations": 50})
     curves = aggregate_quality_evolution(
         [
             RunIndicatorTrack(
                 "random-heuristic",
                 key,
-                (IndicatorSample(1, 0.2, 0.1), IndicatorSample(2, 0.4, 0.2)),
+                1,
+                (IndicatorSample(10, 0.2, 0.1),),
                 exact=False,
             ),
             RunIndicatorTrack(
                 "epsilon-constraint",
                 configuration_key({}),
+                1,
                 (IndicatorSample(1, 0.9, 0.9),),
                 exact=True,
             ),
@@ -167,7 +215,6 @@ def test_an_exact_method_does_not_enter_the_mean_curve() -> None:
     assert is_exact_execution(1, catalog_exact=False) is False
     assert len(curves) == 1
     assert curves[0].algorithm_id == "random-heuristic"
-    assert curves[0].points[0].hypervolume == pytest.approx(0.2)
 
 
 def test_different_parameters_remain_separate_curves() -> None:
@@ -176,13 +223,15 @@ def test_different_parameters_remain_separate_curves() -> None:
             RunIndicatorTrack(
                 "random-heuristic",
                 configuration_key({"iterations": 50, "seed": 3}),
-                (IndicatorSample(1, 0.2, 0.1), IndicatorSample(2, 0.4, 0.2)),
+                1,
+                (IndicatorSample(10, 0.2, 0.1),),
                 exact=False,
             ),
             RunIndicatorTrack(
                 "random-heuristic",
                 configuration_key({"iterations": 10, "seed": 4}),
-                (IndicatorSample(1, 0.8, 0.4), IndicatorSample(2, 0.6, 0.3)),
+                1,
+                (IndicatorSample(10, 0.8, 0.4),),
                 exact=False,
             ),
         ]

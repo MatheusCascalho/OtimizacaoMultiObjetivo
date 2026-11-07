@@ -118,27 +118,35 @@
           </div>
 
           <section class="quality-evolution" id="quality-evolution" aria-label="Evolução dos indicadores de qualidade" hidden>
-            <p id="quality-evolution-note" class="map-mode-status quality-evolution-note">Média do indicador entre execuções com várias rodadas, usando o utópico e o nadir da execução inteira.</p>
-            <article class="quality-evolution-figure panel">
-              <h3 id="hv-evolution-title">Evolução do hipervolume</h3>
+            <p id="quality-evolution-note" class="map-mode-status quality-evolution-note">Cada curva é a fronteira acumulada de uma rodada. O eixo é o número de amostragens acumuladas nessa rodada. A média junta execuções do mesmo algoritmo e parâmetros, na mesma rodada e no mesmo prefixo. O utópico e o nadir são os da execução inteira.</p>
+            <article class="quality-evolution-figure panel" id="hv-evolution-figure">
+              <div class="quality-evolution-heading">
+                <h3 id="hv-evolution-title">Evolução do hipervolume</h3>
+                <button class="button button-light" id="hv-evolution-expand" type="button" aria-pressed="false" aria-controls="hv-evolution-plot">Ampliar gráfico</button>
+              </div>
               <div class="quality-evolution-plot" id="hv-evolution-plot">
                 <div class="y-axis-title" id="hv-evolution-y">Média do hipervolume</div>
                 <div class="quality-evolution-stage">
-                  <canvas id="hv-evolution-chart" role="img" aria-label="Evolução do hipervolume"></canvas>
+                  <canvas class="quality-evolution-chart" id="hv-evolution-chart" role="img" aria-label="Evolução do hipervolume"></canvas>
+                  <div class="chart-tooltip" id="hv-evolution-tooltip" role="status" hidden></div>
                 </div>
-                <div class="x-axis-title" id="hv-evolution-x">Iterações</div>
+                <div class="x-axis-title" id="hv-evolution-x">Amostragens acumuladas na rodada</div>
               </div>
               <p id="hv-evolution-empty" class="quality-evolution-empty" hidden>Nenhuma execução não exata concluída para esta instância.</p>
               <ul id="hv-evolution-legend" class="quality-evolution-legend" aria-label="Curvas da evolução do hipervolume"></ul>
             </article>
-            <article class="quality-evolution-figure panel">
-              <h3 id="spread-evolution-title">Evolução do espalhamento Δ</h3>
+            <article class="quality-evolution-figure panel" id="spread-evolution-figure">
+              <div class="quality-evolution-heading">
+                <h3 id="spread-evolution-title">Evolução do espalhamento Δ</h3>
+                <button class="button button-light" id="spread-evolution-expand" type="button" aria-pressed="false" aria-controls="spread-evolution-plot">Ampliar gráfico</button>
+              </div>
               <div class="quality-evolution-plot" id="spread-evolution-plot">
                 <div class="y-axis-title" id="spread-evolution-y">Média do espalhamento Δ</div>
                 <div class="quality-evolution-stage">
-                  <canvas id="spread-evolution-chart" role="img" aria-label="Evolução do espalhamento Δ"></canvas>
+                  <canvas class="quality-evolution-chart" id="spread-evolution-chart" role="img" aria-label="Evolução do espalhamento Δ"></canvas>
+                  <div class="chart-tooltip" id="spread-evolution-tooltip" role="status" hidden></div>
                 </div>
-                <div class="x-axis-title" id="spread-evolution-x">Iterações</div>
+                <div class="x-axis-title" id="spread-evolution-x">Amostragens acumuladas na rodada</div>
               </div>
               <p id="spread-evolution-empty" class="quality-evolution-empty" hidden>Nenhuma execução não exata concluída para esta instância.</p>
               <ul id="spread-evolution-legend" class="quality-evolution-legend" aria-label="Curvas da evolução do espalhamento Δ"></ul>
@@ -232,6 +240,11 @@
         <div class="dialog-header"><div><p class="section-kicker">COMEÇAR ANÁLISE</p><h2 id="dialog-title">Criar instância</h2></div><button class="icon-button dialog-close" value="cancel" aria-label="Fechar">×</button></div>
         <label class="form-label" for="problem-type">Tipo de problema</label>
         <select id="problem-type"><option value="tsp-time-distance">TSP biobjetivo: tempo e distância</option></select>
+        <label class="form-label" for="instance-algorithm">Algoritmo</label>
+        <select id="instance-algorithm" required>
+          <option value="neuro-lkh" selected>NeuroLKH</option>
+          <option value="random-heuristic">RandomHeuristic</option>
+        </select>
         <label class="form-label" for="instance-title">Nome da instância</label>
         <input id="instance-title" type="text" placeholder="Ex.: Cenário de referência" required>
         <label class="form-label" for="time-file-input">Matriz de tempo (CSV)</label>

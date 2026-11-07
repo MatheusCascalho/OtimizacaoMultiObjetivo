@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from api import create_app
 from api.settings import Settings
 from infrastructure.persistence.postgres.base import Base
-from infrastructure.persistence.postgres.models import Instance, Run, RunSolution
+from infrastructure.persistence.postgres.models import Instance, Run, RunAttemptSample, RunSolution
 from multiobjective_algorithms import ObjectiveSpec, measure_run_indicators
 
 
@@ -98,25 +98,53 @@ def _add_run(
         )
 
 
-def _samples(solutions: list[dict]) -> list[dict]:
+def _add_attempts(
+    session: Session,
+    *,
+    instance_id: str,
+    run_id: str,
+    attempts: list[dict],
+) -> None:
+    for index, sample in enumerate(attempts):
+        session.add(
+            RunAttemptSample(
+                sample_id=f"{run_id}_smp_{index}",
+                run_id=run_id,
+                round_index=sample["round"],
+                attempt_index=sample["attempt"],
+                objective_values={
+                    key: value
+                    for key, value in sample.items()
+                    if key not in {"round", "attempt"}
+                },
+            )
+        )
+
+
+def _samples(attempts: list[dict]) -> list[dict]:
     return [
-        {"round": solution["round"], "time": solution["time"], "distance": solution["distance"]}
-        for solution in solutions
+        {
+            "round": sample["round"],
+            "attempt": sample["attempt"],
+            "time": sample["time"],
+            "distance": sample["distance"],
+        }
+        for sample in attempts
     ]
 
 
 def test_quality_evolution_averages_runs_and_leaves_an_exact_method_out(app: Flask) -> None:
     first = [
-        {"time": 4.0, "distance": 0.0, "round": 1},
-        {"time": 0.0, "distance": 4.0, "round": 1},
-        {"time": 3.0, "distance": 1.0, "round": 2},
-        {"time": 1.0, "distance": 3.0, "round": 2},
+        {"time": 4.0, "distance": 0.0, "round": 1, "attempt": 1},
+        {"time": 0.0, "distance": 4.0, "round": 1, "attempt": 2},
+        {"time": 3.0, "distance": 1.0, "round": 2, "attempt": 1},
+        {"time": 1.0, "distance": 3.0, "round": 2, "attempt": 2},
     ]
     second = [
-        {"time": 2.0, "distance": 0.0, "round": 1},
-        {"time": 0.0, "distance": 2.0, "round": 1},
-        {"time": 2.0, "distance": 0.5, "round": 2},
-        {"time": 0.5, "distance": 2.0, "round": 2},
+        {"time": 2.0, "distance": 0.0, "round": 1, "attempt": 1},
+        {"time": 0.0, "distance": 2.0, "round": 1, "attempt": 2},
+        {"time": 2.0, "distance": 0.5, "round": 2, "attempt": 1},
+        {"time": 0.5, "distance": 2.0, "round": 2, "attempt": 2},
     ]
     with Session(app.extensions["paretolab_database_engine"]) as session:
         _add_instance(session, "inst_evolution")
@@ -129,6 +157,7 @@ def test_quality_evolution_averages_runs_and_leaves_an_exact_method_out(app: Fla
             parameters={"iterations": 50, "repetitions": 5, "seed": 1},
             solutions=first,
         )
+        _add_attempts(session, instance_id="inst_evolution", run_id="run_a", attempts=first)
         _add_run(
             session,
             instance_id="inst_evolution",
@@ -138,6 +167,7 @@ def test_quality_evolution_averages_runs_and_leaves_an_exact_method_out(app: Fla
             parameters={"iterations": 50, "repetitions": 5, "seed": 2},
             solutions=second,
         )
+        _add_attempts(session, instance_id="inst_evolution", run_id="run_b", attempts=second)
         _add_run(
             session,
             instance_id="inst_evolution",
@@ -147,14 +177,23 @@ def test_quality_evolution_averages_runs_and_leaves_an_exact_method_out(app: Fla
             parameters={"iterations": 1},
             solutions=[{"time": 100.0, "distance": 100.0, "round": 1}],
         )
+        _add_attempts(
+            session,
+            instance_id="inst_evolution",
+            run_id="run_exact",
+            attempts=[{"time": 100.0, "distance": 100.0, "round": 1, "attempt": 1}],
+        )
         _add_run(
             session,
             instance_id="inst_evolution",
-            run_id="run_single_round",
+            run_id="run_unordered",
             status="completed",
             algorithm_id="random-heuristic",
-            parameters={"iterations": 50, "repetitions": 5, "seed": 3},
-            solutions=[{"time": 9.0, "distance": 9.0, "round": 1}],
+            parameters={"iterations": 10, "repetitions": 5, "seed": 3},
+            solutions=[
+                {"time": 9.0, "distance": 1.0, "round": 1},
+                {"time": 1.0, "distance": 9.0, "round": 1},
+            ],
         )
         session.commit()
 
@@ -162,8 +201,8 @@ def test_quality_evolution_averages_runs_and_leaves_an_exact_method_out(app: Fla
 
     assert response.status_code == 200
     body = response.json
-    assert body["axis"] == "iteration"
-    assert body["axis_label"] == "Iterações"
+    assert body["axis"] == "accumulated_samples"
+    assert body["axis_label"] == "Amostragens acumuladas na rodada"
     assert body["space"] == "normalized_objectives"
     objectives = (
         ObjectiveSpec("time", "minimize"),
@@ -173,30 +212,56 @@ def test_quality_evolution_averages_runs_and_leaves_an_exact_method_out(app: Fla
     measured_second = measure_run_indicators(_samples(second), objectives)
     hypervolume = body["hypervolume"]["curves"]
     spread = body["spread"]["curves"]
-    assert len(hypervolume) == 1
-    assert len(spread) == 1
-    assert hypervolume[0]["algorithm_id"] == "random-heuristic"
-    assert hypervolume[0]["label"] == "RandomHeuristic"
-    assert [point["iteration"] for point in hypervolume[0]["points"]] == [1, 2]
+    assert [curve["label"] for curve in hypervolume] == [
+        "RandomHeuristic · rodada 1",
+        "RandomHeuristic · rodada 2",
+    ]
+    assert [curve["label"] for curve in spread] == [curve["label"] for curve in hypervolume]
+    assert hypervolume[0]["points"][0]["accumulated_samples"] == 2
     assert hypervolume[0]["points"][0]["mean"] == pytest.approx(
-        (measured_first[0].hypervolume + measured_second[0].hypervolume) / 2
+        (measured_first[0].samples[0].hypervolume + measured_second[0].samples[0].hypervolume) / 2
     )
-    assert hypervolume[0]["points"][1]["mean"] == pytest.approx(
-        (measured_first[1].hypervolume + measured_second[1].hypervolume) / 2
+    assert hypervolume[1]["points"][0]["mean"] == pytest.approx(
+        (measured_first[1].samples[0].hypervolume + measured_second[1].samples[0].hypervolume) / 2
     )
     assert spread[0]["points"][0]["mean"] == pytest.approx(
-        (measured_first[0].spread + measured_second[0].spread) / 2
+        (measured_first[0].samples[0].spread + measured_second[0].samples[0].spread) / 2
     )
     assert "epsilon-constraint" not in {curve["algorithm_id"] for curve in hypervolume}
-    assert "rodada" in body["note"]
+    assert "amostragens" in body["note"]
 
 
-def test_quality_evolution_overlays_one_curve_per_algorithm(app: Flask) -> None:
+def test_quality_evolution_does_not_invent_order_from_solution_id(app: Flask) -> None:
+    with Session(app.extensions["paretolab_database_engine"]) as session:
+        _add_instance(session, "inst_old")
+        _add_run(
+            session,
+            instance_id="inst_old",
+            run_id="run_old",
+            status="completed",
+            algorithm_id="random-heuristic",
+            parameters={"iterations": 50, "repetitions": 5, "seed": 1},
+            solutions=[
+                {"time": 1.0, "distance": 4.0, "round": 1},
+                {"time": 4.0, "distance": 1.0, "round": 1},
+            ],
+        )
+        session.commit()
+
+    response = app.test_client().get("/api/v1/instances/inst_old/quality-evolution")
+
+    assert response.status_code == 200
+    assert response.json["hypervolume"]["curves"] == []
+    assert response.json["spread"]["curves"] == []
+    assert "ordem das amostragens" in response.json["empty_message"]
+
+
+def test_quality_evolution_overlays_one_curve_per_round(app: Flask) -> None:
     front = [
-        {"time": 4.0, "distance": 0.0, "round": 1},
-        {"time": 0.0, "distance": 4.0, "round": 1},
-        {"time": 3.0, "distance": 1.0, "round": 2},
-        {"time": 1.0, "distance": 3.0, "round": 2},
+        {"time": 4.0, "distance": 0.0, "round": 1, "attempt": 1},
+        {"time": 0.0, "distance": 4.0, "round": 1, "attempt": 2},
+        {"time": 3.0, "distance": 1.0, "round": 2, "attempt": 1},
+        {"time": 1.0, "distance": 3.0, "round": 2, "attempt": 2},
     ]
     with Session(app.extensions["paretolab_database_engine"]) as session:
         _add_instance(session, "inst_overlay")
@@ -209,6 +274,7 @@ def test_quality_evolution_overlays_one_curve_per_algorithm(app: Flask) -> None:
             parameters={"iterations": 50, "repetitions": 5, "seed": 1},
             solutions=front,
         )
+        _add_attempts(session, instance_id="inst_overlay", run_id="run_random", attempts=front)
         _add_run(
             session,
             instance_id="inst_overlay",
@@ -218,23 +284,31 @@ def test_quality_evolution_overlays_one_curve_per_algorithm(app: Flask) -> None:
             parameters={"iterations": 20, "repetitions": 4, "seed": 8},
             solutions=front,
         )
+        _add_attempts(session, instance_id="inst_overlay", run_id="run_weighted", attempts=front)
         session.commit()
 
     response = app.test_client().get("/api/v1/instances/inst_overlay/quality-evolution")
 
     assert response.status_code == 200
-    identifiers = [curve["algorithm_id"] for curve in response.json["hypervolume"]["curves"]]
-    assert identifiers == ["random-heuristic", "weighted-sum"]
-    assert [curve["algorithm_id"] for curve in response.json["spread"]["curves"]] == identifiers
-    assert response.json["hypervolume"]["curves"][1]["label"] == "weighted-sum"
+    curves = response.json["hypervolume"]["curves"]
+    assert [(curve["algorithm_id"], curve["round"]) for curve in curves] == [
+        ("random-heuristic", 1),
+        ("random-heuristic", 2),
+        ("weighted-sum", 1),
+        ("weighted-sum", 2),
+    ]
+    assert [curve["algorithm_id"] for curve in response.json["spread"]["curves"]] == [
+        curve["algorithm_id"] for curve in curves
+    ]
+    assert curves[2]["label"] == "weighted-sum · rodada 1"
 
 
 def test_quality_evolution_splits_configurations_of_the_same_algorithm(app: Flask) -> None:
     front = [
-        {"time": 4.0, "distance": 0.0, "round": 1},
-        {"time": 0.0, "distance": 4.0, "round": 1},
-        {"time": 1.0, "distance": 3.0, "round": 2},
-        {"time": 3.0, "distance": 1.0, "round": 2},
+        {"time": 4.0, "distance": 0.0, "round": 1, "attempt": 1},
+        {"time": 0.0, "distance": 4.0, "round": 1, "attempt": 2},
+        {"time": 1.0, "distance": 3.0, "round": 2, "attempt": 1},
+        {"time": 3.0, "distance": 1.0, "round": 2, "attempt": 2},
     ]
     with Session(app.extensions["paretolab_database_engine"]) as session:
         _add_instance(session, "inst_config")
@@ -247,6 +321,7 @@ def test_quality_evolution_splits_configurations_of_the_same_algorithm(app: Flas
             parameters={"iterations": 10, "repetitions": 5, "seed": 1},
             solutions=front,
         )
+        _add_attempts(session, instance_id="inst_config", run_id="run_short", attempts=front)
         _add_run(
             session,
             instance_id="inst_config",
@@ -256,6 +331,7 @@ def test_quality_evolution_splits_configurations_of_the_same_algorithm(app: Flas
             parameters={"iterations": 50, "repetitions": 5, "seed": 2},
             solutions=front,
         )
+        _add_attempts(session, instance_id="inst_config", run_id="run_long", attempts=front)
         session.commit()
 
     response = app.test_client().get("/api/v1/instances/inst_config/quality-evolution")
@@ -263,8 +339,10 @@ def test_quality_evolution_splits_configurations_of_the_same_algorithm(app: Flas
     assert response.status_code == 200
     labels = [curve["label"] for curve in response.json["hypervolume"]["curves"]]
     assert labels == [
-        "RandomHeuristic · 10 amostragens · 5 rodadas",
-        "RandomHeuristic · 50 amostragens · 5 rodadas",
+        "RandomHeuristic · 10 amostragens · 5 rodadas · rodada 1",
+        "RandomHeuristic · 10 amostragens · 5 rodadas · rodada 2",
+        "RandomHeuristic · 50 amostragens · 5 rodadas · rodada 1",
+        "RandomHeuristic · 50 amostragens · 5 rodadas · rodada 2",
     ]
 
 
@@ -297,6 +375,17 @@ def test_catalog_exact_algorithm_is_omitted_even_with_several_rounds(app: Flask)
                 {"time": 3.0, "distance": 1.0, "round": 2},
             ],
         )
+        _add_attempts(
+            session,
+            instance_id="inst_catalog_exact",
+            run_id="run_catalog_exact",
+            attempts=[
+                {"time": 4.0, "distance": 0.0, "round": 1, "attempt": 1},
+                {"time": 0.0, "distance": 4.0, "round": 1, "attempt": 2},
+                {"time": 1.0, "distance": 3.0, "round": 2, "attempt": 1},
+                {"time": 3.0, "distance": 1.0, "round": 2, "attempt": 2},
+            ],
+        )
         session.commit()
 
     response = app.test_client().get("/api/v1/instances/inst_catalog_exact/quality-evolution")
@@ -323,6 +412,15 @@ def test_quality_evolution_errors_and_empty_instances(app: Flask) -> None:
             solutions=[
                 {"time": 1.0, "round": 1},
                 {"time": 2.0, "round": 2},
+            ],
+        )
+        _add_attempts(
+            session,
+            instance_id="inst_invalid",
+            run_id="run_invalid",
+            attempts=[
+                {"time": 1.0, "round": 1, "attempt": 1},
+                {"time": 2.0, "round": 2, "attempt": 1},
             ],
         )
         _add_run(
@@ -360,5 +458,6 @@ def test_quality_evolution_errors_and_empty_instances(app: Flask) -> None:
     assert empty.status_code == 200
     assert empty.json["hypervolume"]["curves"] == []
     assert empty.json["spread"]["curves"] == []
+    assert "empty_message" not in empty.json
     assert running.status_code == 200
     assert running.json["hypervolume"]["curves"] == []

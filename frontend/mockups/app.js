@@ -2,6 +2,10 @@ const API_BASE_URL = window.PARETOLAB_API_BASE_URL || '/api/v1';
 const fallbackProblemTypes = [
   { id: 'tsp-time-distance', name: 'TSP biobjetivo: tempo e distância' },
 ];
+const fallbackAlgorithms = [
+  { id: 'neuro-lkh', name: 'NeuroLKH' },
+  { id: 'random-heuristic', name: 'RandomHeuristic' },
+];
 const mockSolutions = [
   { id: '018', cost: 18.4, coverage: 82.6, items: 12, frontier: true },
   { id: '014', cost: 16.8, coverage: 78.1, items: 10, frontier: true },
@@ -61,6 +65,9 @@ const state = {
   referenceRunId: null,
   qualityEvolution: null,
   qualityEvolutionError: '',
+  qualityExpanded: { 'hv-evolution': false, 'spread-evolution': false },
+  qualityHover: { 'hv-evolution': null, 'spread-evolution': null },
+  qualityFigures: {},
 };
 
 async function fetchJson(endpoint, options = {}) {
@@ -99,12 +106,53 @@ function populateProblemTypes(problemTypes = state.problemTypes) {
   const select = document.querySelector('#problem-type');
   if (!select) return;
 
+  const previous = select.value;
   select.replaceChildren(...problemTypes.map((problemType) => {
     const option = document.createElement('option');
     option.value = problemType.id;
     option.textContent = problemType.name;
     return option;
   }));
+  if (problemTypes.some((problemType) => problemType.id === previous)) {
+    select.value = previous;
+  }
+  populateAlgorithms(select.value);
+}
+
+function renderAlgorithmOptions(algorithms) {
+  const select = document.querySelector('#instance-algorithm');
+  if (!select) return;
+  const available = (algorithms || []).filter((algorithm) => algorithm && algorithm.id);
+  const source = available.length ? available : fallbackAlgorithms;
+  const preferred = source.some((algorithm) => algorithm.id === 'neuro-lkh')
+    ? 'neuro-lkh'
+    : source[0].id;
+  const previous = select.value;
+  const chosen = source.some((algorithm) => algorithm.id === previous) ? previous : preferred;
+  select.replaceChildren(...source.map((algorithm) => {
+    const option = document.createElement('option');
+    option.value = algorithm.id;
+    option.textContent = algorithm.name || algorithm.id;
+    option.defaultSelected = algorithm.id === preferred;
+    option.selected = algorithm.id === chosen;
+    return option;
+  }));
+}
+
+async function populateAlgorithms(problemTypeId) {
+  const select = document.querySelector('#instance-algorithm');
+  if (!select || !problemTypeId) return;
+  try {
+    const problemType = await fetchJson(`/problem-types/${problemTypeId}`);
+    renderAlgorithmOptions(problemType.algorithms || []);
+  } catch (error) {
+    renderAlgorithmOptions(fallbackAlgorithms);
+  }
+}
+
+function openInstanceDialog() {
+  populateAlgorithms(document.querySelector('#problem-type').value);
+  dialog.showModal();
 }
 
 function updateInstanceCount() {
@@ -867,6 +915,7 @@ async function createInstance(event) {
   const errorMessage = document.querySelector('#dialog-error');
   const name = document.querySelector('#instance-title').value.trim();
   const problemTypeId = document.querySelector('#problem-type').value;
+  const algorithmId = document.querySelector('#instance-algorithm').value;
   const timeFile = document.querySelector('#time-file-input').files[0];
   const distanceFile = document.querySelector('#distance-file-input').files[0];
   errorMessage.hidden = true;
@@ -875,6 +924,7 @@ async function createInstance(event) {
     validateMatrixFile(timeFile, 'de tempo');
     validateMatrixFile(distanceFile, 'de distância');
     if (!name) throw new Error('Informe um nome para a instância.');
+    if (!algorithmId) throw new Error('Selecione o algoritmo.');
     if (!document.querySelector('#confirm-node-order').checked) {
       throw new Error('Confirme que os arquivos usam a mesma ordem de cidades.');
     }
@@ -896,7 +946,7 @@ async function createInstance(event) {
         },
         node_order_confirmed: true,
         configuration: {
-          algorithm_id: 'random-heuristic',
+          algorithm_id: algorithmId,
           preview: ['weighted_graph', 'matrix_heatmap'],
           result_views: ['pareto_frontier', 'solutions_table', 'route_graph', 'route_csv'],
         },
@@ -918,6 +968,10 @@ async function createInstance(event) {
     renderTable();
     dialog.close();
     document.querySelector('#instance-form').reset();
+    const algorithmSelect = document.querySelector('#instance-algorithm');
+    if ([...algorithmSelect.options].some((option) => option.value === 'neuro-lkh')) {
+      algorithmSelect.value = 'neuro-lkh';
+    }
     setApiStatus(`Instância “${name}” criada. As matrizes foram validadas pela API.`);
   } catch (error) {
     errorMessage.textContent = error.message;
@@ -1730,13 +1784,30 @@ function renderQualityLegendItem(entry) {
   return item;
 }
 
-function paintQualityFigure(figure, prefix) {
+function applyQualityExpansion(prefix) {
+  const button = document.querySelector(`#${prefix}-expand`);
+  const article = document.querySelector(`#${prefix}-figure`);
+  const expansion = QualityEvolution.chartExpansionState(state.qualityExpanded[prefix]);
+  if (button) {
+    button.textContent = expansion.label;
+    button.setAttribute('aria-pressed', expansion.ariaPressed);
+  }
+  article?.classList.toggle('is-expanded', expansion.expanded);
+}
+
+function paintQualityFigure(figure, prefix, options = {}) {
+  state.qualityFigures[prefix] = figure;
+  if (figure.empty && state.qualityExpanded[prefix]) state.qualityExpanded[prefix] = false;
+  applyQualityExpansion(prefix);
   const plot = document.querySelector(`#${prefix}-plot`);
   const empty = document.querySelector(`#${prefix}-empty`);
   const legend = document.querySelector(`#${prefix}-legend`);
   const canvas = document.querySelector(`#${prefix}-chart`);
+  const tooltip = document.querySelector(`#${prefix}-tooltip`);
+  const button = document.querySelector(`#${prefix}-expand`);
   const xTitle = document.querySelector(`#${prefix}-x`);
   const yTitle = document.querySelector(`#${prefix}-y`);
+  if (button) button.disabled = Boolean(figure.empty);
   if (xTitle) xTitle.textContent = figure.xLabel;
   if (yTitle) yTitle.textContent = figure.yLabel;
   if (empty) {
@@ -1744,13 +1815,18 @@ function paintQualityFigure(figure, prefix) {
     empty.textContent = figure.emptyMessage;
   }
   if (plot) plot.hidden = figure.empty;
-  if (legend) {
+  if (legend && options.legend !== false) {
     legend.hidden = figure.empty || !figure.curves.length;
     legend.replaceChildren(...QualityEvolution.legendEntries(figure).map(renderQualityLegendItem));
   }
+  if (figure.empty) {
+    if (tooltip) tooltip.hidden = true;
+    state.qualityHover[prefix] = null;
+    if (canvas) canvas.dataset.hoverKey = '';
+    return;
+  }
   if (!canvas) return;
   canvas.setAttribute('aria-label', QualityEvolution.figureDescription(figure));
-  if (figure.empty) return;
   const bounds = canvas.getBoundingClientRect();
   if (bounds.width < 2 || bounds.height < 2) return;
   const context = canvas.getContext('2d');
@@ -1758,7 +1834,74 @@ function paintQualityFigure(figure, prefix) {
   canvas.width = Math.max(1, Math.round(bounds.width * ratio));
   canvas.height = Math.max(1, Math.round(bounds.height * ratio));
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
-  QualityEvolution.drawFigure(context, figure, bounds.width, bounds.height);
+  QualityEvolution.drawFigure(context, figure, bounds.width, bounds.height, state.qualityHover[prefix]);
+}
+
+function showQualityTooltip(prefix, hit, figure, pointer, width) {
+  const tooltip = document.querySelector(`#${prefix}-tooltip`);
+  if (!tooltip) return;
+  const detail = QualityEvolution.hoverDetail(hit, figure);
+  if (!detail) {
+    tooltip.hidden = true;
+    return;
+  }
+  const title = document.createElement('strong');
+  title.textContent = detail.title;
+  const lines = detail.lines.map((line) => {
+    const span = document.createElement('span');
+    span.textContent = line;
+    return span;
+  });
+  tooltip.replaceChildren(title, ...lines);
+  tooltip.hidden = false;
+  tooltip.style.left = `${Math.min(pointer.x + 12, Math.max(8, width - 188))}px`;
+  tooltip.style.top = `${Math.max(3, pointer.y - 52)}px`;
+}
+
+function bindQualityChart(prefix) {
+  const button = document.querySelector(`#${prefix}-expand`);
+  const canvas = document.querySelector(`#${prefix}-chart`);
+  if (button) {
+    button.addEventListener('click', () => {
+      if (button.disabled) return;
+      state.qualityExpanded[prefix] = !state.qualityExpanded[prefix];
+      const figure = state.qualityFigures[prefix];
+      if (figure) paintQualityFigure(figure, prefix);
+    });
+  }
+  if (!canvas) return;
+  canvas.addEventListener('pointermove', (event) => {
+    const figure = state.qualityFigures[prefix];
+    const tooltip = document.querySelector(`#${prefix}-tooltip`);
+    if (!figure || figure.empty) {
+      if (tooltip) tooltip.hidden = true;
+      return;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const pointer = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    const geometry = QualityEvolution.figureGeometry(figure, rect.width, rect.height);
+    const hit = QualityEvolution.nearestEvolutionPoint(geometry.points, pointer.x, pointer.y);
+    const key = hit ? `${hit.curveIndex}:${hit.pointIndex}` : '';
+    if (canvas.dataset.hoverKey !== key) {
+      canvas.dataset.hoverKey = key;
+      state.qualityHover[prefix] = hit;
+      paintQualityFigure(figure, prefix, { legend: false });
+    }
+    if (!hit) {
+      if (tooltip) tooltip.hidden = true;
+      return;
+    }
+    showQualityTooltip(prefix, hit, figure, pointer, rect.width);
+  });
+  canvas.addEventListener('pointerleave', () => {
+    const tooltip = document.querySelector(`#${prefix}-tooltip`);
+    if (tooltip) tooltip.hidden = true;
+    if (!canvas.dataset.hoverKey) return;
+    canvas.dataset.hoverKey = '';
+    state.qualityHover[prefix] = null;
+    const figure = state.qualityFigures[prefix];
+    if (figure && !figure.empty) paintQualityFigure(figure, prefix, { legend: false });
+  });
 }
 
 function renderQualityEvolution() {
@@ -2030,8 +2173,11 @@ document.querySelectorAll('.sidebar .nav-item[href^="#"]').forEach((link) => {
 window.addEventListener('hashchange', updateActiveNavigation);
 initializeLocalSettings();
 updateActiveNavigation();
-document.querySelector('#open-modal').addEventListener('click', () => dialog.showModal());
-document.querySelector('#open-modal-secondary').addEventListener('click', () => dialog.showModal());
+document.querySelector('#open-modal').addEventListener('click', openInstanceDialog);
+document.querySelector('#open-modal-secondary').addEventListener('click', openInstanceDialog);
+document.querySelector('#problem-type').addEventListener('change', (event) => {
+  populateAlgorithms(event.target.value);
+});
 document.querySelector('#instance-form').addEventListener('submit', createInstance);
 document.querySelector('#start-run').addEventListener('click', startRun);
 document.querySelector('#cancel-run').addEventListener('click', cancelRun);
@@ -2165,6 +2311,8 @@ document.querySelector('#neighbors-per-city').addEventListener('change', (event)
 
 const resizeObserver = new ResizeObserver(drawChart);
 resizeObserver.observe(chart);
+bindQualityChart('hv-evolution');
+bindQualityChart('spread-evolution');
 const qualityEvolutionSection = document.querySelector('#quality-evolution');
 if (qualityEvolutionSection) {
   const qualityResizeObserver = new ResizeObserver(() => {
