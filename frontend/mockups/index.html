@@ -17,6 +17,7 @@
     <script src="round_filter.js" defer></script>
     <script src="solution_compare.js" defer></script>
     <script src="robustness.js" defer></script>
+    <script src="emission_heatmap.js" defer></script>
     <script src="app.js" defer></script>
   </head>
   <body>
@@ -199,7 +200,7 @@
               <section class="selected-panel panel">
                 <div class="panel-heading selected-heading"><div><p class="section-kicker">ALTERNATIVA EM FOCO</p><h2 id="selected-title">Nenhuma selecionada</h2></div></div>
                 <div class="selected-chart"><canvas id="route-chart" role="img" aria-label="Gráfico da rota selecionada; selecione Ver rota para carregar os dados"></canvas></div>
-                <div class="detail-metrics"><div class="detail-metric"><span><i class="legend-dot coral-dot"></i>Distância</span><strong id="selected-cost">-- km</strong></div><div class="detail-metric"><span><i class="legend-dot blue-dot"></i>Tempo</span><strong id="selected-coverage">-- h</strong></div><div class="detail-metric"><span>Cidades na rota</span><strong id="selected-items">--</strong></div></div>
+                <div class="detail-metrics"><div class="detail-metric"><span><i class="legend-dot coral-dot"></i>Distância</span><strong id="selected-cost">-- km</strong></div><div class="detail-metric"><span><i class="legend-dot blue-dot"></i>Tempo</span><strong id="selected-coverage">-- h</strong></div><div class="detail-metric"><span>Cidades na rota</span><strong id="selected-items">--</strong></div><div class="detail-metric"><span title="Média dos fatores de velocidade dos arcos, ponderada pela distância">Fator de emissão</span><strong id="selected-emission">--</strong></div></div>
                 <div class="reference-distance" id="reference-distance" role="group" aria-labelledby="reference-distance-heading" aria-live="polite" hidden><p class="metric-label" id="reference-distance-heading">Distância euclidiana normalizada</p><div id="reference-distance-values"><div class="detail-metric"><span>Até a solução utópica</span><strong id="distance-utopian">--</strong></div><div class="detail-metric"><span>Até a solução antiutópica</span><strong id="distance-antiutopian">--</strong></div></div><p class="reference-distance-note" id="reference-distance-note"></p></div>
                 <button class="button button-light compare-button" id="toggle-compare-solution" type="button" disabled aria-pressed="false">Incluir na comparação</button>
                 <button class="button button-primary compare-button" id="view-route" type="button" disabled><span aria-hidden="true">⌖</span> Ver rota</button>
@@ -227,81 +228,30 @@
             <p id="robustness-status" class="map-mode-status" role="status">A análise ainda não foi executada.</p>
             <p id="robustness-note" class="map-mode-status" hidden></p>
             <ul id="robustness-warnings" class="robustness-warnings" hidden></ul>
-            <div class="quality-table-scroll" id="robustness-table-wrap" hidden>
-              <table id="robustness-table" class="quality-table">
-                <caption class="sr-only">Métricas de robustez das soluções da fronteira aproximada</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Solução</th>
-                    <th scope="col">Distância</th>
-                    <th scope="col" title="Tempo da rota com a matriz nominal">Tempo nominal</th>
-                    <th scope="col">Média</th>
-                    <th scope="col" title="Desvio-padrão dividido pela média do tempo simulado">CV</th>
-                    <th scope="col" title="Tempo não excedido em 95% dos cenários">P95</th>
-                    <th scope="col" title="Média do tempo nos cenários além do P95">CVaR 95%</th>
-                    <th scope="col" title="Probabilidade de exceder o prazo. Sem prazo, a célula fica sem valor.">P(prazo)</th>
-                    <th scope="col" title="Fração dos cenários em que a solução tem o menor tempo">Melhor tempo</th>
-                    <th scope="col" title="Fração dos cenários em que a solução permanece não dominada">Na fronteira</th>
-                    <th scope="col" title="Tempo a mais em relação à melhor solução do mesmo cenário">Regret médio</th>
-                    <th scope="col">Regret P95</th>
-                    <th scope="col" title="Contribuição média ao hipervolume do conjunto em cada cenário">Δ hipervolume</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
-            </div>
-            <div class="quality-table-scroll" id="robustness-arcs-wrap" hidden>
-              <table id="robustness-arcs" class="quality-table">
-                <caption>Arcos que mais concentram a variação do tempo</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Solução</th>
-                    <th scope="col">Arco</th>
-                    <th scope="col">Tempo nominal</th>
-                    <th scope="col" title="Participação na variância quando os arcos são independentes">Participação na variância</th>
-                    <th scope="col" title="Correlação do tempo do arco com o tempo da rota nos mesmos cenários">Correlação</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
-            </div>
-            <ul id="robustness-legend" class="robustness-legend" hidden></ul>
-            <div class="robustness-charts" id="robustness-charts" hidden>
-              <article class="robustness-figure" id="robustness-figure-box">
-                <h3>Tempo simulado</h3>
-                <p class="robustness-caption">A caixa é a metade central dos cenários. O losango coral é o tempo nominal.</p>
-                <canvas class="robustness-chart" id="robustness-box" role="img" aria-label="Boxplot do tempo simulado de cada solução da fronteira"></canvas>
-              </article>
-              <article class="robustness-figure" id="robustness-figure-cloud">
-                <h3>Distância e tempo nos cenários</h3>
-                <p class="robustness-caption">Cada ponto é a mesma rota em um cenário. A distância não muda.</p>
-                <canvas class="robustness-chart" id="robustness-cloud" role="img" aria-label="Nuvem de distância e tempo simulado"></canvas>
-              </article>
-              <article class="robustness-figure" id="robustness-figure-ranks">
-                <h3>Posição pelo tempo</h3>
-                <p class="robustness-caption">Cada faixa é a frequência de uma posição. Verde é o primeiro lugar.</p>
-                <canvas class="robustness-chart" id="robustness-ranks" role="img" aria-label="Distribuição das posições de cada solução pelo tempo"></canvas>
-              </article>
-              <article class="robustness-figure" id="robustness-figure-dominance">
-                <h3>Probabilidade de dominância</h3>
-                <p class="robustness-caption">A linha é quem domina e a coluna é quem é dominada.</p>
-                <canvas class="robustness-chart" id="robustness-dominance" role="img" aria-label="Mapa da probabilidade de uma solução dominar outra"></canvas>
-              </article>
-              <article class="robustness-figure" id="robustness-figure-cv-p95">
-                <h3>P95 conforme o CV</h3>
-                <p class="robustness-caption">Amostra própria da sensibilidade, com a correlação regional da análise.</p>
-                <canvas class="robustness-chart" id="robustness-cv-p95" role="img" aria-label="P95 do tempo em função do coeficiente de variação"></canvas>
-              </article>
-              <article class="robustness-figure" id="robustness-figure-cv-pi">
-                <h3>Fronteira conforme o CV</h3>
-                <p class="robustness-caption">Probabilidade de a solução continuar não dominada.</p>
-                <canvas class="robustness-chart" id="robustness-cv-pi" role="img" aria-label="Probabilidade de permanecer na fronteira em função do CV"></canvas>
-              </article>
-              <article class="robustness-figure" id="robustness-figure-rho">
-                <h3>Fronteira conforme ρ</h3>
-                <p class="robustness-caption">A mesma probabilidade quando a correlação dentro da região muda.</p>
-                <canvas class="robustness-chart" id="robustness-rho-pi" role="img" aria-label="Probabilidade de permanecer na fronteira em função da correlação regional"></canvas>
-              </article>
+            <div id="robustness-results" hidden>
+              <div class="robustness-toolbar">
+                <label class="search-box" for="robustness-filter"><span aria-hidden="true">⌕</span><input id="robustness-filter" type="search" placeholder="Filtrar soluções" aria-label="Filtrar soluções da análise de robustez"></label>
+                <p id="robustness-minmax" class="robustness-choice" hidden></p>
+              </div>
+              <div class="quality-table-scroll" id="robustness-table-wrap">
+                <table id="robustness-table" class="quality-table">
+                  <caption class="sr-only">Métricas de robustez das soluções da fronteira aproximada</caption>
+                  <thead></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <div class="robustness-charts" id="robustness-charts">
+                <article class="robustness-figure" id="robustness-figure-box">
+                  <h3>Tempo simulado</h3>
+                  <p class="robustness-caption">A caixa é a metade central dos cenários. O losango coral é o tempo nominal. O rótulo é o início do identificador da solução.</p>
+                  <canvas class="robustness-chart" id="robustness-box" role="img" aria-label="Boxplot do tempo simulado de cada solução da fronteira"></canvas>
+                </article>
+                <article class="robustness-figure" id="robustness-figure-dominance">
+                  <h3>Probabilidade de dominância</h3>
+                  <p class="robustness-caption">A linha é quem domina e a coluna é quem é dominada. O rótulo é o início do identificador da solução.</p>
+                  <canvas class="robustness-chart robustness-chart-dominance" id="robustness-dominance" role="img" aria-label="Mapa da probabilidade de uma solução dominar outra"></canvas>
+                </article>
+              </div>
             </div>
           </section>
           <section class="workspace-section" id="documentacao" aria-labelledby="documentation-title">
@@ -362,12 +312,14 @@
         </div>
         <button class="icon-button dialog-close" id="close-route-dialog" type="button" aria-label="Fechar">×</button>
       </div>
-      <div class="route-viewer-toolbar" role="toolbar" aria-label="Zoom do grafo">
+      <div class="route-viewer-toolbar" role="toolbar" aria-label="Visualização da rota">
         <button class="button button-light" id="route-zoom-out" type="button">Diminuir zoom</button>
         <span class="route-zoom-readout" aria-live="polite"><span class="sr-only">Zoom atual: </span><span id="route-zoom-level">100%</span></span>
         <button class="button button-light" id="route-zoom-in" type="button">Aumentar zoom</button>
         <button class="button button-light" id="route-zoom-reset" type="button">Tamanho original</button>
+        <button class="button button-light" id="route-emission-heatmap" type="button" aria-pressed="false">Densidade de CO2 (kg, suavizada)</button>
       </div>
+      <p class="route-emission-summary" id="route-emission-summary" hidden></p>
       <div class="route-viewer-stage" id="route-viewer-stage">
         <canvas id="route-viewer-canvas" role="img" aria-label="Grafo ampliado da rota selecionada"></canvas>
       </div>

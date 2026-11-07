@@ -67,6 +67,8 @@ test('the summary table and the sensitivity note use the simulated metrics', () 
         regret_mean: 0.5,
         regret_p95: 1.2,
         hypervolume_contribution: 1.5,
+        minmax_regret: 0.071,
+        minmax_regret_p95: 0.094,
         rank_frequencies: [0.4, 0.6],
         boxplot: { min: 8, q1: 9, median: 10, q3: 11, max: 14, nominal: 10 },
         critical_arcs: [{ source: 1, target: 2, nominal_time: 3, variance_share: 0.5, correlation: 0.7 }],
@@ -89,25 +91,57 @@ test('the summary table and the sensitivity note use the simulated metrics', () 
   });
 
   assert.ok(report);
-  assert.equal(report.solutions[0].label, 'S1');
+  assert.equal(report.solutions[0].name, 'SOL-sol_a');
   assert.equal(report.warnings.length, 1);
   assert.deepEqual(robustness.tableRows(report)[0], [
-    'S1',
+    'SOL-sol_a',
     '4',
     '10',
     '10,1',
     '0,08',
-    '12',
-    '13',
-    '—',
-    '40%',
     '90%',
     '0,5',
-    '1,2',
     '1,5',
+    '7,1% · 9,4%',
   ]);
+  assert.match(robustness.minmaxNote(report), /SOL-sol_a \(7,1%\)/);
+  assert.match(robustness.minmaxNote(report), /P95: SOL-sol_a \(9,4%\)/);
   assert.match(robustness.describeReport(report), /5\.000 cenários/);
   assert.match(robustness.describeReport(report), /média igual ao tempo nominal/);
   assert.match(robustness.inversionNote(report), /CV 0,2/);
   assert.equal(robustness.mapReport({ solutions: [] }), null);
 });
+
+test('the metrics table filters by the solution name and sorts by a column', () => {
+  const report = robustness.mapReport({
+    solutions: [
+      solution('sol_far', 8, 6, 0.1, 0.2),
+      solution('sol_near', 4, 10, 0.071, 0.094),
+    ],
+    dominance: [[0, 0], [0, 0]],
+  });
+
+  const byDistance = robustness.viewSolutions(report, { sort: { column: 'distance', direction: 'asc' } });
+  assert.deepEqual(byDistance.map((item) => item.name), ['SOL-sol_near', 'SOL-sol_far']);
+  const byRegret = robustness.tableRows(report, { sort: { column: 'minmax', direction: 'asc' } });
+  assert.equal(byRegret[0][0], 'SOL-sol_near');
+  assert.equal(byRegret[0][8], '7,1% · 9,4%');
+  const filtered = robustness.tableRows(report, { query: 'sol_far' });
+  assert.deepEqual(filtered.map((row) => row[0]), ['SOL-sol_far']);
+});
+
+function solution(id, distance, mean, minmax, minmaxP95) {
+  return {
+    solution_id: id,
+    distance,
+    nominal_time: mean,
+    mean,
+    coefficient_of_variation: 0,
+    pareto_probability: 1,
+    regret_mean: 0,
+    hypervolume_contribution: 1,
+    minmax_regret: minmax,
+    minmax_regret_p95: minmaxP95,
+    boxplot: { min: mean, q1: mean, median: mean, q3: mean, max: mean, nominal: mean },
+  };
+}

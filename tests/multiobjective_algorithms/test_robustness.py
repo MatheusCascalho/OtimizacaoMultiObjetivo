@@ -5,6 +5,7 @@ from multiobjective_algorithms.robustness import (
     SensitivityPoint,
     analyze_robustness,
     frontier_loss_cv,
+    normalized_minmax_regret,
     ranking_inversion_cv,
 )
 
@@ -78,6 +79,10 @@ def test_zero_variability_reproduces_nominal_times_and_dominance() -> None:
     assert long.distance_regret == pytest.approx(3)
     assert short.rank_frequencies == pytest.approx((1, 0))
     assert long.rank_frequencies == pytest.approx((0, 1))
+    assert short.minmax_regret == pytest.approx(0)
+    assert short.minmax_regret_p95 == pytest.approx(0)
+    assert long.minmax_regret == pytest.approx(1.5)
+    assert long.minmax_regret_p95 == pytest.approx(1.5)
     assert report.mean_hypervolume == pytest.approx(21.775)
     assert short.hypervolume_contribution == pytest.approx(21.775)
     assert long.hypervolume_contribution == pytest.approx(0)
@@ -273,6 +278,41 @@ def test_ranking_and_frontier_loss_use_the_sensitivity_curve() -> None:
     assert ranking_inversion_cv((4.0,), points[:1]) is None
 
 
+def test_normalized_minmax_regret_follows_the_metric_table() -> None:
+    ratios = (
+        (0.000, 0.276, 0.315),
+        (0.006, 0.181, 0.217),
+        (0.029, 0.143, 0.177),
+        (0.036, 0.137, 0.171),
+        (0.062, 0.114, 0.145),
+        (0.064, 0.098, 0.131),
+        (0.071, 0.064, 0.094),
+        (0.103, 0.064, 0.094),
+        (0.116, 0.047, 0.077),
+        (0.147, 0.047, 0.078),
+        (0.153, 0.036, 0.067),
+        (0.154, 0.025, 0.053),
+        (0.162, 0.020, 0.049),
+        (0.177, 0.003, 0.018),
+    )
+    distance_reference = 1223.6
+    time_reference = 17.91
+    scored = normalized_minmax_regret(
+        [distance_reference * (1 + distance) for distance, _, _ in ratios],
+        [time_reference] * len(ratios),
+        [time_reference * mean for _, mean, _ in ratios],
+        [time_reference * tail for _, _, tail in ratios],
+    )
+
+    assert scored[6].score == pytest.approx(0.071)
+    assert scored[6].score_p95 == pytest.approx(0.094)
+    assert min(range(len(scored)), key=lambda index: scored[index].score) == 6
+    assert min(range(len(scored)), key=lambda index: scored[index].score_p95) == 6
+    undefined = normalized_minmax_regret([0, 1], [0, 0], [0, 1], [0, 1])
+    assert undefined[0].score == 0
+    assert undefined[1].score is None
+
+
 def test_rejects_invalid_routes_and_uncertainty_parameters() -> None:
     time, distance, routes = _dominated_pair()
 
@@ -282,6 +322,56 @@ def test_rejects_invalid_routes_and_uncertainty_parameters() -> None:
         analyze_robustness(routes, distance, time, cv=-0.1, rho=0, rho0=0, scenarios=4, seed=1)
     with pytest.raises(ValueError, match="rho"):
         analyze_robustness(routes, distance, time, cv=0.2, rho=0.8, rho0=0.3, scenarios=4, seed=1)
-    with pytest.raises(ValueError, match="positivos"):
-        zero = _blank(4)
-        analyze_robustness(routes[:1], distance, zero, cv=0, rho=0, rho0=0, scenarios=4, seed=1)
+    with pytest.raises(ValueError, match="negativos"):
+        negative = _blank(4)
+        negative[0][1] = -1
+        analyze_robustness(routes[:1], distance, negative, cv=0, rho=0, rho0=0, scenarios=4, seed=1)
+
+
+def test_zero_nominal_arc_stays_zero_under_lognormal_shocks() -> None:
+    time, distance, routes = _dominated_pair()
+    time[0][1] = 0.0
+
+    report = analyze_robustness(
+        routes[:1],
+        distance,
+        time,
+        cv=0.4,
+        rho=0,
+        rho0=0,
+        scenarios=2000,
+        seed=7,
+        include_sensitivity=False,
+    )
+
+    solution = report.solutions[0]
+    assert solution.nominal_time == pytest.approx(3)
+    assert solution.mean == pytest.approx(3, rel=0.03)
+    assert report.deterministic_zero_arcs == 1
+    assert solution.critical_arcs
+    assert all(arc.nominal_time > 0 for arc in solution.critical_arcs)
+    assert sum(arc.variance_share for arc in solution.critical_arcs) == pytest.approx(1)
+
+
+def test_all_zero_times_remain_deterministic() -> None:
+    _, distance, routes = _dominated_pair()
+
+    report = analyze_robustness(
+        routes[:1],
+        distance,
+        _blank(4),
+        cv=0.2,
+        rho=0,
+        rho0=0,
+        scenarios=16,
+        seed=1,
+        include_sensitivity=False,
+    )
+
+    solution = report.solutions[0]
+    assert solution.nominal_time == 0
+    assert solution.mean == 0
+    assert solution.stdev == 0
+    assert solution.coefficient_of_variation is None
+    assert solution.critical_arcs == ()
+    assert report.deterministic_zero_arcs == 4

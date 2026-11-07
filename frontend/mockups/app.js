@@ -51,6 +51,11 @@ const state = {
   notifications: [],
   routeGraph: null,
   routeGraphKey: null,
+  emissionsBySolution: {},
+  emissionRunId: null,
+  routeEmission: null,
+  routeEmissionKey: null,
+  routeViewMode: 'graph',
   comparedIds: [],
   comparisonEntries: [],
   comparisonIllustrative: false,
@@ -644,6 +649,11 @@ function clearReferencePoints() {
   state.hypervolume = null;
   state.hypervolumeRunId = null;
   state.hiddenRounds = new Set();
+  state.emissionsBySolution = {};
+  state.emissionRunId = null;
+  state.routeEmission = null;
+  state.routeEmissionKey = null;
+  state.routeViewMode = 'graph';
 }
 
 function filterVisibleRoundSolutions(solutions) {
@@ -726,6 +736,17 @@ async function loadRunResults(runId, offset) {
       state.hypervolume = null;
       state.hypervolumeRunId = null;
       setApiStatus(`Não foi possível calcular o hipervolume: ${error.message}`, true);
+    }
+  }
+  if (state.emissionRunId !== runId && window.EmissionHeatmap) {
+    try {
+      const emission = await fetchJson(`/runs/${runId}/emissions`);
+      state.emissionsBySolution = EmissionHeatmap.indexBySolution(emission);
+      state.emissionRunId = runId;
+    } catch (error) {
+      state.emissionsBySolution = {};
+      state.emissionRunId = null;
+      setApiStatus(`Não foi possível calcular a emissão de CO2: ${error.message}`, true);
     }
   }
   selectedId = state.solutions[0]?.id || null;
@@ -1102,6 +1123,9 @@ function syncRoutePreview() {
   state.routeGraphKey = null;
   expandButton.disabled = true;
   if (hadGraph) clearRouteCanvas();
+  state.routeEmission = null;
+  state.routeEmissionKey = null;
+  resetEmissionToggle();
   const routeDialog = document.querySelector('#route-dialog');
   if (routeDialog?.open) routeDialog.close();
 }
@@ -1218,6 +1242,25 @@ function drawExpandedRoute() {
   const canvas = document.querySelector('#route-viewer-canvas');
   const bounds = canvas.getBoundingClientRect();
   if (bounds.width < 2 || bounds.height < 2) return;
+  if (
+    state.routeViewMode === 'heatmap'
+    && state.routeEmission
+    && state.routeEmissionKey === state.routeGraphKey
+    && window.EmissionHeatmap
+  ) {
+    EmissionHeatmap.draw(canvas, {
+      heatmap: state.routeEmission.heatmap,
+      heatmap_message: state.routeEmission.heatmap_message,
+      nodes: state.routeGraph.nodes,
+      route: state.routeGraph.route,
+    }, {
+      zoom: routeView.zoom,
+      panX: routeView.panX,
+      panY: routeView.panY,
+    });
+    canvas.setAttribute('aria-label', EmissionHeatmap.description(state.routeEmission));
+    return;
+  }
   drawRouteGraph(state.routeGraph, canvas, {
     zoom: routeView.zoom,
     panX: routeView.panX,
@@ -1254,6 +1297,94 @@ function resetRouteZoom() {
   drawExpandedRoute();
 }
 
+const ROUTE_VIEWER_HINT = 'Roda do mouse amplia o ponto sob o cursor. Arraste para deslocar o grafo. Zoom de 50% a 400%.';
+
+function resetEmissionToggle() {
+  state.routeViewMode = 'graph';
+  const button = document.querySelector('#route-emission-heatmap');
+  if (button) {
+    button.setAttribute('aria-pressed', 'false');
+    button.classList.remove('is-active');
+    button.disabled = false;
+    button.textContent = 'Densidade de CO2 (kg, suavizada)';
+  }
+  const hint = document.querySelector('#route-viewer-hint');
+  if (hint) hint.textContent = ROUTE_VIEWER_HINT;
+}
+
+function showStoredEmissionFactor() {
+  const summary = document.querySelector('#route-emission-summary');
+  if (!summary || !window.EmissionHeatmap) return;
+  const solution = state.solutions.find((item) => item.id === state.selectedSolutionId);
+  const row = solution?.solutionId ? state.emissionsBySolution[solution.solutionId] : null;
+  const text = EmissionHeatmap.summaryText(row);
+  summary.classList.remove('is-error');
+  summary.hidden = !text;
+  summary.textContent = text;
+}
+
+function activateEmissionHeatmap() {
+  state.routeViewMode = 'heatmap';
+  const button = document.querySelector('#route-emission-heatmap');
+  button.setAttribute('aria-pressed', 'true');
+  button.classList.add('is-active');
+  const summary = document.querySelector('#route-emission-summary');
+  const text = EmissionHeatmap.summaryText(state.routeEmission);
+  summary.classList.remove('is-error');
+  summary.hidden = !text;
+  summary.textContent = text;
+  document.querySelector('#route-viewer-hint').textContent = EmissionHeatmap.heatmapHint(state.routeEmission);
+  const solution = state.solutions.find((item) => item.id === state.selectedSolutionId);
+  document.querySelector('#route-dialog-title').textContent = solution
+    ? `Densidade de CO2 · Solução ${solution.id}`
+    : 'Densidade de CO2';
+  drawExpandedRoute();
+}
+
+function showEmissionError(message) {
+  const summary = document.querySelector('#route-emission-summary');
+  summary.hidden = false;
+  summary.classList.add('is-error');
+  summary.textContent = message;
+}
+
+async function toggleEmissionHeatmap() {
+  const button = document.querySelector('#route-emission-heatmap');
+  const solution = state.solutions.find((item) => item.id === state.selectedSolutionId);
+  if (state.routeViewMode === 'heatmap') {
+    resetEmissionToggle();
+    document.querySelector('#route-dialog-title').textContent = solution
+      ? `Grafo da rota · Solução ${solution.id}`
+      : 'Grafo da rota';
+    showStoredEmissionFactor();
+    drawExpandedRoute();
+    return;
+  }
+  const key = currentRouteKey();
+  if (!solution?.solutionId || !key || !state.activeRun?.run_id) return;
+  if (state.routeEmission && state.routeEmissionKey === key) {
+    if (state.routeEmission.heatmap) activateEmissionHeatmap();
+    else showEmissionError(state.routeEmission.heatmap_message || 'A densidade de CO2 não está disponível para esta solução.');
+    return;
+  }
+  button.disabled = true;
+  button.textContent = 'Calculando densidade...';
+  try {
+    const payload = await fetchJson(`/runs/${state.activeRun.run_id}/solutions/${solution.solutionId}/emission`);
+    if (currentRouteKey() !== key || !document.querySelector('#route-dialog').open) return;
+    state.routeEmission = payload;
+    state.routeEmissionKey = key;
+    if (solution.solutionId) state.emissionsBySolution[solution.solutionId] = payload;
+    if (payload.heatmap) activateEmissionHeatmap();
+    else showEmissionError(payload.heatmap_message || 'A densidade de CO2 não está disponível para esta solução.');
+  } catch (error) {
+    if (currentRouteKey() === key) showEmissionError(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Densidade de CO2 (kg, suavizada)';
+  }
+}
+
 function openRouteViewer() {
   if (!state.routeGraph || state.routeGraphKey !== currentRouteKey()) return;
   routeView.zoom = 1;
@@ -1263,6 +1394,8 @@ function openRouteViewer() {
   document.querySelector('#route-dialog-title').textContent = solution
     ? `Grafo da rota · Solução ${solution.id}`
     : 'Grafo da rota';
+  resetEmissionToggle();
+  showStoredEmissionFactor();
   updateRouteZoomControls();
   const routeDialog = document.querySelector('#route-dialog');
   if (!routeDialog.open) routeDialog.showModal();
@@ -2493,6 +2626,13 @@ function selectSolution(id) {
   document.querySelector('#selected-items').textContent = solution.route?.length
     ? `${solution.route.length - 1} arcos`
     : `${solution.items} de 20`;
+  const emissionNode = document.querySelector('#selected-emission');
+  if (emissionNode) {
+    const row = solution.solutionId ? state.emissionsBySolution[solution.solutionId] : null;
+    emissionNode.textContent = window.EmissionHeatmap
+      ? EmissionHeatmap.formatFactor(row && row.total_speed_emission_factor)
+      : '--';
+  }
   document.querySelector('#view-route').disabled = !solution.solutionId;
   document.querySelector('#download-route').disabled = !solution.solutionId;
   renderTable();
@@ -2624,6 +2764,7 @@ document.querySelector('#toggle-compare-solution').addEventListener('click', () 
 document.querySelector('#compare-solutions').addEventListener('click', openComparison);
 document.querySelector('#view-route').addEventListener('click', showSelectedRoute);
 document.querySelector('#expand-route').addEventListener('click', openRouteViewer);
+document.querySelector('#route-emission-heatmap').addEventListener('click', toggleEmissionHeatmap);
 document.querySelector('#download-route').addEventListener('click', downloadSelectedRoute);
 document.querySelector('#close-route-dialog').addEventListener('click', () => {
   document.querySelector('#route-dialog').close();

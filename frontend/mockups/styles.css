@@ -374,6 +374,9 @@ h2 { margin: 0; font: 600 16px/1.3 var(--display); letter-spacing: 0; }
 .route-graph-dialog .dialog-close { flex: 0 0 auto; }
 .route-viewer-toolbar { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
 .route-viewer-toolbar .button { flex: 0 1 auto; max-width: 100%; min-height: 32px; padding: 6px 10px; font-size: 11px; line-height: 1.2; white-space: normal; text-align: center; }
+.route-viewer-toolbar .button.is-active { border-color: var(--green); background: #eef4ed; color: var(--green); }
+.route-emission-summary { flex: 0 0 auto; margin: 0 0 10px; color: var(--ink); font: 500 11px var(--mono); line-height: 1.45; }
+.route-emission-summary.is-error { color: #a64c32; font-family: "DM Sans", sans-serif; }
 .route-zoom-readout { position: relative; display: inline-flex; min-width: 4.6rem; min-height: 32px; align-items: center; justify-content: center; padding: 0 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); color: var(--ink); font: 500 12px var(--mono); }
 .route-viewer-stage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; border: 1px solid #e9ebe3; background: #f8f8f3; touch-action: none; }
 #route-viewer-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; user-select: none; }
@@ -399,17 +402,22 @@ h2 { margin: 0; font: 600 16px/1.3 var(--display); letter-spacing: 0; }
 .robustness-panel .panel-heading { margin-bottom: 8px; }
 .robustness-warnings { margin: 8px 0 0; padding-left: 18px; color: #8a5a32; font-size: 12px; }
 .robustness-warnings[hidden] { display: none; }
-.robustness-legend { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 12px 0 0; padding: 0; list-style: none; }
-.robustness-legend[hidden] { display: none; }
-.robustness-legend li { display: flex; align-items: center; gap: 6px; color: #536157; font-size: 11px; }
-.robustness-swatch { width: 9px; height: 9px; border-radius: 50%; }
+#robustness-results[hidden] { display: none; }
+.robustness-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-top: 12px; }
+.robustness-toolbar .search-box { width: min(100%, 280px); }
+.robustness-choice { flex: 1 1 280px; margin: 0; color: #28624d; font-size: 12px; line-height: 1.45; }
+.robustness-choice[hidden] { display: none; }
+.robustness-sort { display: inline-flex; align-items: center; gap: 2px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; letter-spacing: inherit; cursor: pointer; }
+.robustness-sort:focus-visible { outline: 2px solid #28624d; outline-offset: 2px; }
+#robustness-table { white-space: nowrap; }
+#robustness-table tbody tr.is-minmax { background: #eef4ed; }
 .robustness-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
-.robustness-charts[hidden] { display: none; }
 .robustness-figure { min-width: 0; padding: 10px 12px 12px; border: 1px solid var(--line); border-radius: 5px; background: #fbfaf6; }
 .robustness-figure[hidden] { display: none; }
 .robustness-figure h3 { margin: 0 0 4px; font: 600 14px/1.3 var(--display); }
 .robustness-caption { margin: 0 0 8px; color: #78817b; font-size: 12px; }
-.robustness-chart { display: block; width: 100%; height: 260px; }
+.robustness-chart { display: block; width: 100%; height: 360px; }
+.robustness-chart-dominance { height: 480px; }
 .quality-table caption:not(.sr-only) { padding: 8px 12px 0; caption-side: top; color: var(--ink); font: 600 13px/1.3 var(--display); text-align: left; }
-@media (max-width: 800px) { .robustness-charts { grid-template-columns: 1fr; } .robustness-chart { height: 220px; } }
+@media (max-width: 800px) { .robustness-charts { grid-template-columns: 1fr; } .robustness-chart, .robustness-chart-dominance { height: 300px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }

@@ -5,14 +5,16 @@ Routes stay fixed. Distance is deterministic and travel time on each used
 arc is log-normal. Every route is scored on the same scenarios.
 
 The nominal time is the mean of that log-normal by default, so the
-simulation isolates variability. A median convention is available. Arc
-shocks can share a regional factor and an optional global factor. This
-module does not reoptimize the routes.
+simulation isolates variability. A median convention is available. A used
+arc whose nominal time is zero stays at zero in every scenario: a
+nonnegative time with mean zero cannot vary. Arc shocks can share a
+regional factor and an optional global factor. This module does not
+reoptimize the routes.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import isfinite, sqrt
 from numbers import Integral, Real
 from typing import Literal, Mapping, Sequence
@@ -70,6 +72,8 @@ class SolutionRobustness:
     box_q3: float
     box_max: float
     critical_arcs: tuple[CriticalArc, ...]
+    minmax_regret: float | None = None
+    minmax_regret_p95: float | None = None
 
 
 @dataclass(frozen=True)
@@ -112,6 +116,7 @@ class RobustnessReport:
     sensitivity_by_rho: tuple[SensitivityPoint, ...]
     ranking_inversion_cv: float | None
     frontier_loss_cv: float | None
+    deterministic_zero_arcs: int
 
 
 @dataclass(frozen=True)
@@ -125,6 +130,7 @@ class _Simulation:
     arc_times: np.ndarray | None
     region_method: str
     region_count: int
+    deterministic_zero_arcs: int
 
 
 def analyze_robustness(
@@ -251,6 +257,7 @@ def analyze_robustness(
         sensitivity_by_rho=by_rho,
         ranking_inversion_cv=inversion,
         frontier_loss_cv=frontier_loss,
+        deterministic_zero_arcs=simulation.deterministic_zero_arcs,
     )
 
 
@@ -299,6 +306,72 @@ def frontier_loss_cv(
     return None
 
 
+@dataclass(frozen=True)
+class NormalizedMinMaxRegret:
+    distance_ratio: float | None
+    time_ratio: float | None
+    time_p95_ratio: float | None
+    score: float | None
+    score_p95: float | None
+
+
+def normalized_minmax_regret(
+    distance: Sequence[float],
+    mean_time: Sequence[float],
+    regret_mean: Sequence[float],
+    regret_p95: Sequence[float],
+) -> tuple[NormalizedMinMaxRegret, ...]:
+    """Worst relative regret between distance and time for each solution.
+
+    Distance uses ``(D_k - min D) / min D``. Time divides the mean regret,
+    and separately the P95 regret, by the smallest mean time. Each score is
+    the larger of the distance ratio and that time ratio. A zero reference
+    makes the ratio undefined when the excess is positive. The preferred
+    solution is the one with the smaller score.
+    """
+
+    count = len(distance)
+    if not count or len(mean_time) != count or len(regret_mean) != count or len(regret_p95) != count:
+        raise ValueError("as métricas de min-max regret precisam ter o mesmo tamanho e ao menos uma solução")
+    distances = [_finite(value, "distância") for value in distance]
+    means = [_finite(value, "média") for value in mean_time]
+    regrets = [_finite(value, "regret médio") for value in regret_mean]
+    regrets_p95 = [_finite(value, "regret P95") for value in regret_p95]
+    if any(value < 0 for value in distances + regrets + regrets_p95):
+        raise ValueError("distância e regrets do min-max precisam ser não negativos")
+    distance_reference = min(distances)
+    time_reference = min(means)
+    rows: list[NormalizedMinMaxRegret] = []
+    for index in range(count):
+        distance_ratio = _relative_excess(distances[index] - distance_reference, distance_reference)
+        time_ratio = _relative_excess(regrets[index], time_reference)
+        time_p95_ratio = _relative_excess(regrets_p95[index], time_reference)
+        rows.append(
+            NormalizedMinMaxRegret(
+                distance_ratio=distance_ratio,
+                time_ratio=time_ratio,
+                time_p95_ratio=time_p95_ratio,
+                score=_worst_ratio(distance_ratio, time_ratio),
+                score_p95=_worst_ratio(distance_ratio, time_p95_ratio),
+            )
+        )
+    return tuple(rows)
+
+
+def _relative_excess(excess: float, reference: float) -> float | None:
+    if reference > 0:
+        return excess / reference
+    if excess == 0:
+        return 0.0
+    return None
+
+
+def _worst_ratio(left: float | None, right: float | None) -> float | None:
+    if left is None or right is None:
+        return None
+    return max(left, right)
+
+
 def _simulate(
     routes: Sequence[Sequence[int]],
     distance: Sequence[Sequence[float]],
@@ -335,8 +408,7 @@ def _simulate(
     arc_index = {arc: index for index, arc in enumerate(arcs)}
     pairs = np.asarray(arcs, dtype=int)
     used_time = time_matrix[pairs[:, 0] - 1, pairs[:, 1] - 1]
-    if np.any(used_time <= 0):
-        raise ValueError("os tempos dos arcos usados precisam ser positivos")
+    positive = used_time > 0
 
     solution_count = len(arc_lists)
     incidence = np.zeros((solution_count, len(arcs)), dtype=float)
@@ -346,11 +418,16 @@ def _simulate(
         incidence[solution_index, indices] = 1.0
         route_arc_indices.append(indices)
 
-    sigma = np.full(len(arcs), float(np.sqrt(np.log1p(cv * cv))), dtype=float)
-    if convention == "mean":
-        mu = np.log(used_time) - 0.5 * sigma * sigma
-    else:
-        mu = np.log(used_time)
+    sigma = np.zeros(len(arcs), dtype=float)
+    mu = np.zeros(len(arcs), dtype=float)
+    if cv > 0 and np.any(positive):
+        sigma_value = float(np.sqrt(np.log1p(cv * cv)))
+        sigma[positive] = sigma_value
+        logged = np.log(used_time[positive])
+        if convention == "mean":
+            mu[positive] = logged - 0.5 * sigma_value * sigma_value
+        else:
+            mu[positive] = logged
 
     region_ids, region_method = _regions(arcs, points, node_count, seed)
     arc_times = _sample_arc_times(
@@ -379,6 +456,7 @@ def _simulate(
         arc_times=arc_times if keep_arc_samples else None,
         region_method=region_method,
         region_count=int(len(np.unique(region_ids))),
+        deterministic_zero_arcs=int(np.count_nonzero(~positive)),
     )
 
 
@@ -405,7 +483,9 @@ def _sample_arc_times(
         + sqrt(rho) * regional
         + sqrt(1.0 - rho0 - rho) * idiosyncratic
     )
-    return np.exp(mu + sigma * shocks)
+    sampled = np.exp(mu + sigma * shocks)
+    sampled[:, nominal <= 0] = 0.0
+    return sampled
 
 
 def _measure(
@@ -484,6 +564,16 @@ def _measure(
                 critical_arcs=_critical_arcs(simulation, index, cv),
             )
         )
+    scored = normalized_minmax_regret(
+        [item.distance for item in solutions],
+        [item.mean for item in solutions],
+        [item.regret_mean for item in solutions],
+        [item.regret_p95 for item in solutions],
+    )
+    solutions = [
+        replace(item, minmax_regret=score.score, minmax_regret_p95=score.score_p95)
+        for item, score in zip(solutions, scored, strict=True)
+    ]
     return (
         tuple(solutions),
         tuple(tuple(float(value) for value in row) for row in dominance),
@@ -538,16 +628,21 @@ def _sensitivity_point(
 def _critical_arcs(simulation: _Simulation, solution_index: int, cv: float) -> tuple[CriticalArc, ...]:
     indices = simulation.route_arc_indices[solution_index]
     nominal = simulation.arc_nominal[indices]
-    variance = (cv * nominal) ** 2
+    eligible = np.flatnonzero(nominal > 0)
+    if eligible.size == 0:
+        return ()
+    chosen = nominal[eligible]
+    variance = (cv * chosen) ** 2
     total = float(variance.sum())
-    shares = variance / total if total > 0 else np.full(nominal.shape, 1 / nominal.size)
+    shares = variance / total if total > 0 else np.full(chosen.shape, 1 / chosen.size)
     samples = simulation.arc_times
     route_time = simulation.times[:, solution_index]
     ranked: list[tuple[float, float, int]] = []
-    for position, arc_index in enumerate(indices):
+    for offset, position in enumerate(eligible):
+        arc_index = int(indices[int(position)])
         correlation = None if samples is None else _correlation_coefficient(samples[:, arc_index], route_time)
         score = -1.0 if correlation is None else abs(correlation)
-        ranked.append((score, float(shares[position]), position))
+        ranked.append((score, float(shares[offset]), int(position)))
     ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
     arcs: list[CriticalArc] = []
     for _, share, position in ranked[:TOP_ARCS]:

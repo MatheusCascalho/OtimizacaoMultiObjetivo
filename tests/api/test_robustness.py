@@ -109,6 +109,9 @@ def test_robustness_evaluates_the_approximate_front_without_reoptimizing(app: Fl
     assert body["solutions"][0]["mean"] == pytest.approx(10)
     assert body["solutions"][1]["nominal_time"] == pytest.approx(6)
     assert body["solutions"][0]["pareto_probability"] == pytest.approx(1)
+    assert body["solutions"][0]["minmax_regret"] == pytest.approx(4 / 6)
+    assert body["solutions"][1]["minmax_regret"] == pytest.approx(1)
+    assert body["solutions"][1]["minmax_regret_p95"] == pytest.approx(1)
     assert body["solutions"][1]["pareto_probability"] == pytest.approx(1)
     assert body["dominance"][0][1] == pytest.approx(0)
     assert body["sensitivity"] is None

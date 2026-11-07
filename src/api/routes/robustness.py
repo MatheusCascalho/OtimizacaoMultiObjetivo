@@ -213,6 +213,8 @@ def _objective(row: RunSolution, key: str) -> float:
 
 def _objective_warnings(rows: list[RunSolution], report: RobustnessReport) -> list[str]:
     warnings: list[str] = []
+    if report.deterministic_zero_arcs:
+        warnings.append(_zero_arc_warning(report.deterministic_zero_arcs))
     for row, solution in zip(rows, report.solutions):
         stored_time = _objective(row, "time")
         stored_distance = _objective(row, "distance")
@@ -221,6 +223,15 @@ def _objective_warnings(rows: list[RunSolution], report: RobustnessReport) -> li
                 f"A distância ou o tempo recalculados de {row.solution_id} diferem dos valores mapeados."
             )
     return warnings
+
+
+def _zero_arc_warning(count: int) -> str:
+    if count == 1:
+        return "1 arco usado tem tempo nominal zero e permanece igual a zero em todos os cenários."
+    formatted = f"{count:,}".replace(",", ".")
+    return (
+        f"{formatted} arcos usados têm tempo nominal zero e permanecem iguais a zero em todos os cenários."
+    )
 
 
 def _differs(stored: float, recalculated: float) -> bool:
@@ -295,6 +306,8 @@ def _solution_payload(solution_id: str, label_index: int, solution: SolutionRobu
         "regret_max": solution.regret_max,
         "distance_regret": solution.distance_regret,
         "hypervolume_contribution": solution.hypervolume_contribution,
+        "minmax_regret": solution.minmax_regret,
+        "minmax_regret_p95": solution.minmax_regret_p95,
         "rank_frequencies": list(solution.rank_frequencies),
         "boxplot": {
             "min": solution.box_min,

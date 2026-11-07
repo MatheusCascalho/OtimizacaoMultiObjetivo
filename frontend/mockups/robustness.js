@@ -10,23 +10,25 @@
   const NOMINAL = '#d96545';
 
   const COLUMNS = [
-    { id: 'label', label: 'Solução' },
-    { id: 'distance', label: 'Distância' },
-    { id: 'nominal', label: 'Tempo nominal' },
-    { id: 'mean', label: 'Média' },
-    { id: 'cv', label: 'CV' },
-    { id: 'p95', label: 'P95' },
-    { id: 'cvar', label: 'CVaR 95%' },
-    { id: 'violation', label: 'P(prazo)' },
-    { id: 'win', label: 'Melhor tempo' },
-    { id: 'frontier', label: 'Na fronteira' },
-    { id: 'regretMean', label: 'Regret médio' },
-    { id: 'regretP95', label: 'Regret P95' },
-    { id: 'hypervolume', label: 'Δ hipervolume' },
+    { id: 'name', label: 'Solução', numeric: false },
+    { id: 'distance', label: 'Distância', title: 'Distância da rota, em quilômetros' },
+    { id: 'nominal', label: 'Tempo nominal', title: 'Tempo da rota com a matriz nominal, em horas' },
+    { id: 'mean', label: 'Média', title: 'Média do tempo simulado, em horas' },
+    { id: 'cv', label: 'CV', title: 'Desvio-padrão dividido pela média do tempo simulado' },
+    { id: 'frontier', label: 'Na fronteira', title: 'Fração dos cenários em que a solução permanece não dominada' },
+    { id: 'regretMean', label: 'Regret médio', title: 'Tempo a mais, em média, em relação à melhor solução do mesmo cenário' },
+    { id: 'hypervolume', label: 'Δ hipervolume', title: 'Contribuição média ao hipervolume do conjunto em cada cenário' },
+    {
+      id: 'minmax',
+      label: 'Min-max regret',
+      title: 'Pior arrependimento relativo entre distância e tempo. O primeiro percentual usa o regret médio; o segundo, o P95. Menor é melhor.',
+    },
   ];
 
   let panel = null;
   let activeReport = null;
+  let tableQuery = '';
+  let tableSort = null;
 
   function canAnalyze({ hasInstance, resultIsDemo, mappedCount, runStatus } = {}) {
     if (!hasInstance || resultIsDemo) return false;
@@ -40,6 +42,7 @@
       const box = solution && solution.boxplot;
       return {
         id: solution.solution_id || `s${index + 1}`,
+        name: solutionName(solution.solution_id, index),
         label: solution.label || `S${index + 1}`,
         color: COLORS[index % COLORS.length],
         distance: finite(solution.distance),
@@ -54,6 +57,8 @@
         regretMean: finite(solution.regret_mean),
         regretP95: finite(solution.regret_p95),
         hypervolume: finite(solution.hypervolume_contribution),
+        minmax: finite(solution.minmax_regret),
+        minmaxP95: finite(solution.minmax_regret_p95),
         rankFrequencies: Array.isArray(solution.rank_frequencies)
           ? solution.rank_frequencies.map(finite)
           : [],
@@ -91,22 +96,82 @@
     };
   }
 
-  function tableRows(report) {
-    return report.solutions.map((solution) => [
-      solution.label,
+  function tableRows(report, options = {}) {
+    return viewSolutions(report, options).map(tableValues);
+  }
+
+  function tableValues(solution) {
+    return [
+      solution.name,
       formatNumber(solution.distance, 2),
       formatNumber(solution.nominalTime, 2),
       formatNumber(solution.mean, 2),
       formatNumber(solution.coefficientOfVariation, 3),
-      formatNumber(solution.p95, 2),
-      formatNumber(solution.cvar, 2),
-      formatPercent(solution.violation),
-      formatPercent(solution.win),
       formatPercent(solution.frontier),
       formatNumber(solution.regretMean, 2),
-      formatNumber(solution.regretP95, 2),
       formatNumber(solution.hypervolume, 3),
-    ]);
+      formatMinmax(solution),
+    ];
+  }
+
+  function viewSolutions(report, options = {}) {
+    const query = String(options.query || '').trim().toLowerCase();
+    const rows = report.solutions.filter((solution) => tableValues(solution).join(' ').toLowerCase().includes(query));
+    const sort = options.sort;
+    if (!sort || !COLUMNS.some((column) => column.id === sort.column)) return rows;
+    const direction = sort.direction === 'desc' ? -1 : 1;
+    return rows.slice().sort((left, right) => compareSolutions(left, right, sort.column, direction));
+  }
+
+  function compareSolutions(left, right, column, direction) {
+    if (column === 'name') return direction * left.name.localeCompare(right.name, 'pt-BR');
+    const leftValue = sortValue(left, column);
+    const rightValue = sortValue(right, column);
+    if (leftValue == null && rightValue == null) return 0;
+    if (leftValue == null) return 1;
+    if (rightValue == null) return -1;
+    return direction * (leftValue - rightValue);
+  }
+
+  function sortValue(solution, column) {
+    if (column === 'nominal') return solution.nominalTime;
+    if (column === 'cv') return solution.coefficientOfVariation;
+    if (column === 'minmax') return solution.minmax;
+    return solution[column];
+  }
+
+  function formatMinmax(solution) {
+    if (solution.minmax == null && solution.minmaxP95 == null) return '—';
+    return `${formatPercent(solution.minmax)} · ${formatPercent(solution.minmaxP95)}`;
+  }
+
+  function minmaxNote(report) {
+    const solutions = report.solutions.filter((solution) => solution.minmax != null);
+    if (!solutions.length) return '';
+    const best = Math.min(...solutions.map((solution) => solution.minmax));
+    const meanNames = solutions.filter((solution) => solution.minmax === best).map((solution) => solution.name);
+    const tails = report.solutions.filter((solution) => solution.minmaxP95 != null);
+    const bestTail = tails.length ? Math.min(...tails.map((solution) => solution.minmaxP95)) : null;
+    const tailNames = tails.filter((solution) => solution.minmaxP95 === bestTail).map((solution) => solution.name);
+    const meanText = `Menor min-max regret na média: ${formatNameList(meanNames)} (${formatPercent(best)}).`;
+    if (bestTail == null) return meanText;
+    return `${meanText} No P95: ${formatNameList(tailNames)} (${formatPercent(bestTail)}).`;
+  }
+
+  function formatNameList(names) {
+    if (names.length <= 1) return names[0] || '—';
+    if (names.length === 2) return `${names[0]} e ${names[1]}`;
+    return `${names.slice(0, -1).join(', ')} e ${names[names.length - 1]}`;
+  }
+
+  function solutionName(solutionId, index) {
+    return solutionId ? `SOL-${solutionId}` : `SOL-${index + 1}`;
+  }
+
+  function axisLabel(name, maxChars) {
+    const body = name.startsWith('SOL-') ? name.slice(4) : name;
+    if (body.length <= maxChars) return body;
+    return `${body.slice(0, Math.max(1, maxChars - 1))}…`;
   }
 
   function describeReport(report) {
@@ -139,6 +204,24 @@
 
   function mount(nextPanel) {
     panel = nextPanel;
+    const filter = panel.querySelector('#robustness-filter');
+    if (filter) {
+      filter.addEventListener('input', () => {
+        tableQuery = filter.value;
+        if (activeReport) renderTable(activeReport);
+      });
+    }
+    const table = panel.querySelector('#robustness-table');
+    if (table) {
+      table.addEventListener('click', (event) => {
+        const button = event.target.closest('button[data-column]');
+        if (!button || !activeReport) return;
+        const column = button.dataset.column;
+        if (!tableSort || tableSort.column !== column) tableSort = { column, direction: 'asc' };
+        else tableSort = { column, direction: tableSort.direction === 'asc' ? 'desc' : 'asc' };
+        renderTable(activeReport);
+      });
+    }
     window.addEventListener('resize', () => {
       if (panel && activeReport && !panel.hidden) drawAll(activeReport);
     });
@@ -148,21 +231,22 @@
     const report = mapReport(payload);
     if (!report || !panel) return false;
     activeReport = report;
+    tableQuery = '';
+    tableSort = null;
     panel.hidden = false;
     const status = panel.querySelector('#robustness-status');
     if (status) status.textContent = describeReport(report);
     const note = panel.querySelector('#robustness-note');
     if (note) {
-      const extra = [report.note, inversionNote(report)].filter(Boolean).join(' ');
-      note.hidden = !extra;
-      note.textContent = extra;
+      note.hidden = !report.note;
+      note.textContent = report.note;
     }
+    const filter = panel.querySelector('#robustness-filter');
+    if (filter) filter.value = '';
     renderWarnings(report);
     renderTable(report);
-    renderArcs(report);
-    renderLegend(report);
-    const charts = panel.querySelector('#robustness-charts');
-    if (charts) charts.hidden = false;
+    const results = panel.querySelector('#robustness-results');
+    if (results) results.hidden = false;
     drawWhenReady(report, 0);
     return true;
   }
@@ -173,7 +257,11 @@
     panel.hidden = true;
     const status = panel.querySelector('#robustness-status');
     if (status) status.textContent = 'A análise ainda não foi executada.';
-    ['#robustness-note', '#robustness-warnings', '#robustness-table-wrap', '#robustness-arcs-wrap', '#robustness-legend', '#robustness-charts']
+    tableQuery = '';
+    tableSort = null;
+    const filter = panel.querySelector('#robustness-filter');
+    if (filter) filter.value = '';
+    ['#robustness-note', '#robustness-warnings', '#robustness-results']
       .forEach((selector) => {
         const element = panel.querySelector(selector);
         if (element) element.hidden = true;
@@ -193,59 +281,69 @@
   }
 
   function renderTable(report) {
-    const wrap = panel.querySelector('#robustness-table-wrap');
     const table = panel.querySelector('#robustness-table');
-    if (!wrap || !table) return;
+    const choice = panel.querySelector('#robustness-minmax');
+    if (!table) return;
+    const head = table.querySelector('thead');
     const body = table.querySelector('tbody');
+    const header = document.createElement('tr');
+    COLUMNS.forEach((column) => {
+      const cell = document.createElement('th');
+      cell.scope = 'col';
+      if (column.title) cell.title = column.title;
+      const sorted = tableSort && tableSort.column === column.id ? tableSort.direction : null;
+      cell.setAttribute('aria-sort', sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : 'none');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'robustness-sort';
+      button.dataset.column = column.id;
+      const directionName = sorted === 'asc' ? 'decrescente' : 'crescente';
+      button.setAttribute('aria-label', `Ordenar por ${column.label.toLowerCase()} em ordem ${directionName}`);
+      button.textContent = column.label;
+      if (sorted) {
+        const mark = document.createElement('span');
+        mark.setAttribute('aria-hidden', 'true');
+        mark.textContent = sorted === 'asc' ? ' ↑' : ' ↓';
+        button.append(mark);
+      }
+      cell.append(button);
+      header.append(cell);
+    });
+    head.replaceChildren(header);
+    const visible = viewSolutions(report, { query: tableQuery, sort: tableSort });
+    const best = preferredMinmax(report.solutions);
     body.replaceChildren();
-    tableRows(report).forEach((values) => {
+    if (!visible.length) {
       const row = document.createElement('tr');
-      values.forEach((value, index) => {
+      const cell = document.createElement('td');
+      cell.colSpan = COLUMNS.length;
+      cell.textContent = 'Nenhuma solução corresponde ao filtro.';
+      row.append(cell);
+      body.append(row);
+    }
+    visible.forEach((solution) => {
+      const row = document.createElement('tr');
+      if (best != null && solution.minmax === best) row.className = 'is-minmax';
+      tableValues(solution).forEach((value, index) => {
         const cell = document.createElement(index === 0 ? 'th' : 'td');
-        if (index === 0) cell.scope = 'row';
+        if (index === 0) {
+          cell.scope = 'row';
+          cell.title = solution.name;
+        }
         cell.textContent = value;
         row.append(cell);
       });
       body.append(row);
     });
-    wrap.hidden = false;
+    if (choice) {
+      choice.textContent = minmaxNote(report);
+      choice.hidden = !choice.textContent;
+    }
   }
 
-  function renderArcs(report) {
-    const wrap = panel.querySelector('#robustness-arcs-wrap');
-    const table = panel.querySelector('#robustness-arcs');
-    if (!wrap || !table) return;
-    const body = table.querySelector('tbody');
-    body.replaceChildren();
-    report.solutions.forEach((solution) => {
-      solution.criticalArcs.forEach((arc) => {
-        const row = document.createElement('tr');
-        [solution.label, `${arc.source} → ${arc.target}`, formatNumber(arc.nominalTime, 2), formatPercent(arc.varianceShare), formatNumber(arc.correlation, 3)]
-          .forEach((value, index) => {
-            const cell = document.createElement(index === 0 ? 'th' : 'td');
-            if (index === 0) cell.scope = 'row';
-            cell.textContent = value;
-            row.append(cell);
-          });
-        body.append(row);
-      });
-    });
-    wrap.hidden = !body.children.length;
-  }
-
-  function renderLegend(report) {
-    const list = panel.querySelector('#robustness-legend');
-    if (!list) return;
-    list.replaceChildren();
-    report.solutions.forEach((solution) => {
-      const item = document.createElement('li');
-      const swatch = document.createElement('span');
-      swatch.className = 'robustness-swatch';
-      swatch.style.background = solution.color;
-      item.append(swatch, document.createTextNode(solution.label));
-      list.append(item);
-    });
-    list.hidden = false;
+  function preferredMinmax(solutions) {
+    const values = solutions.map((solution) => solution.minmax).filter((value) => value != null);
+    return values.length ? Math.min(...values) : null;
   }
 
   function drawWhenReady(report, attempt) {
@@ -258,12 +356,7 @@
   function drawAll(report) {
     const states = [
       ['robustness-figure-box', drawBoxplot(panel.querySelector('#robustness-box'), report)],
-      ['robustness-figure-cloud', drawCloud(panel.querySelector('#robustness-cloud'), report)],
-      ['robustness-figure-ranks', drawRanks(panel.querySelector('#robustness-ranks'), report)],
       ['robustness-figure-dominance', drawDominance(panel.querySelector('#robustness-dominance'), report)],
-      ['robustness-figure-cv-p95', drawSensitivity(panel.querySelector('#robustness-cv-p95'), report, 'p95', 'CV', 'P95 do tempo')],
-      ['robustness-figure-cv-pi', drawSensitivity(panel.querySelector('#robustness-cv-pi'), report, 'pareto', 'CV', 'Probabilidade na fronteira')],
-      ['robustness-figure-rho', drawRho(panel.querySelector('#robustness-rho-pi'), report)],
     ];
     states.forEach(([id, state]) => toggleFigure(id, state));
     return states.some(([, state]) => state === 'pending');
@@ -282,7 +375,7 @@
     const { ctx, width, height } = fitted;
     const values = report.solutions.flatMap((solution) => [solution.boxplot.min, solution.boxplot.max, solution.boxplot.nominal]);
     const scale = scaleFrom(values);
-    const pad = { top: 16, right: 12, bottom: report.solutions.length > 8 ? 48 : 32, left: 52 };
+    const pad = { top: 12, right: 12, bottom: 118, left: 48 };
     const plot = plotBox(width, height, pad);
     drawYAxis(ctx, plot, scale, formatNumber);
     const slot = plot.width / report.solutions.length;
@@ -310,70 +403,14 @@
       ctx.stroke();
       diamond(ctx, center, y(box.nominal), 4.5, NOMINAL);
       ctx.fillStyle = MUTED;
-      ctx.font = '11px "IBM Plex Mono", ui-monospace, monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(solution.label, center, plot.bottom + 16);
-    });
-    return 'drawn';
-  }
-
-  function drawCloud(canvas, report) {
-    if (!report.cloud.length) return 'unsupported';
-    const fitted = fitCanvas(canvas);
-    if (!fitted) return 'pending';
-    const { ctx, width, height } = fitted;
-    const pad = { top: 16, right: 12, bottom: 32, left: 52 };
-    const plot = plotBox(width, height, pad);
-    const xs = report.solutions.map((solution) => solution.distance);
-    const ys = report.cloud.flat().map(Number).filter(Number.isFinite);
-    report.solutions.forEach((solution) => ys.push(solution.nominalTime));
-    const xScale = scaleFrom(xs);
-    const yScale = scaleFrom(ys);
-    drawYAxis(ctx, plot, yScale, formatNumber);
-    drawXAxis(ctx, plot, xScale, formatNumber, xs);
-    report.cloud.forEach((row) => {
-      report.solutions.forEach((solution, index) => {
-        const time = finite(row[index]);
-        if (time == null) return;
-        ctx.fillStyle = withAlpha(solution.color, 0.28);
-        ctx.beginPath();
-        ctx.arc(xAt(plot, xScale, solution.distance), yAt(plot, yScale, time), 2.4, 0, Math.PI * 2);
-        ctx.fill();
-      });
-    });
-    report.solutions.forEach((solution) => {
-      diamond(ctx, xAt(plot, xScale, solution.distance), yAt(plot, yScale, solution.nominalTime), 5, solution.color);
-    });
-    return 'drawn';
-  }
-
-  function drawRanks(canvas, report) {
-    const ready = report.solutions.every((solution) => solution.rankFrequencies.length === report.solutions.length);
-    if (!ready) return 'unsupported';
-    const fitted = fitCanvas(canvas);
-    if (!fitted) return 'pending';
-    const { ctx, width, height } = fitted;
-    const pad = { top: 16, right: 12, bottom: 32, left: 52 };
-    const plot = plotBox(width, height, pad);
-    const scale = { min: 0, max: 1 };
-    drawYAxis(ctx, plot, scale, (value) => formatPercent(value));
-    const slot = plot.width / report.solutions.length;
-    report.solutions.forEach((solution, index) => {
-      const left = plot.left + slot * index + slot * 0.22;
-      const barWidth = slot * 0.56;
-      let cursor = 0;
-      solution.rankFrequencies.forEach((frequency, rank) => {
-        if (!frequency) return;
-        const top = yAt(plot, scale, cursor + frequency);
-        const bottom = yAt(plot, scale, cursor);
-        ctx.fillStyle = rankColor(rank, report.solutions.length);
-        ctx.fillRect(left, top, barWidth, Math.max(1, bottom - top));
-        cursor += frequency;
-      });
-      ctx.fillStyle = MUTED;
-      ctx.font = '11px "IBM Plex Mono", ui-monospace, monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(solution.label, left + barWidth / 2, plot.bottom + 16);
+      ctx.font = '10px "IBM Plex Mono", ui-monospace, monospace';
+      ctx.save();
+      ctx.translate(center, plot.bottom + 8);
+      ctx.rotate(-Math.PI / 4);
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(axisLabel(solution.name, fitted.width < 720 ? 8 : 12), 0, 0);
+      ctx.restore();
     });
     return 'drawn';
   }
@@ -384,7 +421,8 @@
     if (!fitted) return 'pending';
     const { ctx, width, height } = fitted;
     const count = report.solutions.length;
-    const pad = { top: 16, right: 12, bottom: 32, left: 36 };
+    const labelLimit = fitted.width < 720 ? 8 : 12;
+    const pad = { top: 12, right: 12, bottom: 108, left: labelLimit > 8 ? 96 : 72 };
     const plot = plotBox(width, height, pad);
     const cell = Math.min(plot.width / count, plot.height / count);
     const originX = plot.left + (plot.width - cell * count) / 2;
@@ -404,83 +442,23 @@
         }
       });
       ctx.fillStyle = MUTED;
-      ctx.font = '11px "IBM Plex Mono", ui-monospace, monospace';
+      ctx.font = '10px "IBM Plex Mono", ui-monospace, monospace';
       ctx.textAlign = 'right';
-      ctx.fillText(report.solutions[rowIndex].label, originX - 4, originY + rowIndex * cell + cell / 2 + 3);
+      ctx.textBaseline = 'middle';
+      ctx.fillText(axisLabel(report.solutions[rowIndex].name, labelLimit), originX - 6, originY + rowIndex * cell + cell / 2);
     });
-    ctx.textAlign = 'center';
     report.solutions.forEach((solution, index) => {
-      ctx.fillText(solution.label, originX + index * cell + cell / 2, originY + count * cell + 14);
+      ctx.save();
+      ctx.translate(originX + index * cell + cell / 2, originY + count * cell + 8);
+      ctx.rotate(-Math.PI / 4);
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(axisLabel(solution.name, labelLimit), 0, 0);
+      ctx.restore();
     });
     return 'drawn';
   }
 
-  function drawSensitivity(canvas, report, metric, xLabel, yLabel) {
-    const points = report.sensitivity && report.sensitivity.byCv;
-    if (!points || points.length < 2) return 'unsupported';
-    const field = metric === 'pareto' ? 'paretoProbability' : 'p95';
-    return drawLines(canvas, points.map((point) => point.cv), report.solutions.map((solution, index) => ({
-      color: solution.color,
-      values: points.map((point) => point[field][index]),
-    })), xLabel, yLabel, metric === 'pareto');
-  }
-
-  function drawRho(canvas, report) {
-    const points = report.sensitivity && report.sensitivity.byRho;
-    if (!points || points.length < 2) return 'unsupported';
-    return drawLines(canvas, points.map((point) => point.rho), report.solutions.map((solution, index) => ({
-      color: solution.color,
-      values: points.map((point) => point.paretoProbability[index]),
-    })), 'ρ', 'Probabilidade na fronteira', true);
-  }
-
-  function drawLines(canvas, xValues, series, xLabel, yLabel, unitInterval) {
-    const yValues = series.flatMap((item) => item.values).filter((value) => value != null);
-    if (!yValues.length) return 'unsupported';
-    const fitted = fitCanvas(canvas);
-    if (!fitted) return 'pending';
-    const { ctx, width, height } = fitted;
-    const pad = { top: 16, right: 12, bottom: 36, left: 56 };
-    const plot = plotBox(width, height, pad);
-    const xScale = scaleFrom(xValues);
-    const yScale = unitInterval ? { min: 0, max: 1 } : scaleFrom(yValues);
-    drawYAxis(ctx, plot, yScale, unitInterval ? formatPercent : formatNumber);
-    drawXAxis(ctx, plot, xScale, (value) => formatNumber(value, 2), xValues);
-    ctx.fillStyle = MUTED;
-    ctx.font = '11px "DM Sans", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(xLabel, plot.left + plot.width / 2, height - 6);
-    series.forEach((item) => {
-      ctx.strokeStyle = item.color;
-      ctx.lineWidth = 1.8;
-      ctx.beginPath();
-      let started = false;
-      item.values.forEach((value, index) => {
-        if (value == null) return;
-        const x = xAt(plot, xScale, xValues[index]);
-        const y = yAt(plot, yScale, value);
-        if (!started) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-        started = true;
-      });
-      ctx.stroke();
-      item.values.forEach((value, index) => {
-        if (value == null) return;
-        ctx.fillStyle = item.color;
-        ctx.beginPath();
-        ctx.arc(xAt(plot, xScale, xValues[index]), yAt(plot, yScale, value), 3, 0, Math.PI * 2);
-        ctx.fill();
-      });
-    });
-    ctx.save();
-    ctx.translate(14, plot.top + plot.height / 2);
-    ctx.rotate(-Math.PI / 2);
-    ctx.fillStyle = MUTED;
-    ctx.textAlign = 'center';
-    ctx.fillText(yLabel, 0, 0);
-    ctx.restore();
-    return 'drawn';
-  }
 
   function fitCanvas(canvas) {
     if (!canvas || typeof canvas.getContext !== 'function' || typeof canvas.getBoundingClientRect !== 'function') return null;
@@ -522,9 +500,6 @@
     return plot.top + (scale.max - value) / (scale.max - scale.min) * plot.height;
   }
 
-  function xAt(plot, scale, value) {
-    return plot.left + (value - scale.min) / (scale.max - scale.min) * plot.width;
-  }
 
   function drawYAxis(ctx, plot, scale, format) {
     ctx.strokeStyle = GRID;
@@ -543,24 +518,6 @@
     }
   }
 
-  function drawXAxis(ctx, plot, scale, format, ticks) {
-    ctx.strokeStyle = INK;
-    ctx.beginPath();
-    ctx.moveTo(plot.left, plot.bottom);
-    ctx.lineTo(plot.left + plot.width, plot.bottom);
-    ctx.stroke();
-    ctx.fillStyle = MUTED;
-    ctx.font = '10px "IBM Plex Mono", ui-monospace, monospace';
-    ctx.textAlign = 'center';
-    const marks = ticks && ticks.length
-      ? [...new Set(ticks.map((value) => finite(value)).filter((value) => value != null))]
-      : [scale.min, (scale.min + scale.max) / 2, scale.max];
-    marks.forEach((value) => {
-      const x = xAt(plot, scale, value);
-      if (x < plot.left - 8 || x > plot.left + plot.width + 8) return;
-      ctx.fillText(format(value, 2), x, plot.bottom + 14);
-    });
-  }
 
   function diamond(ctx, x, y, radius, color) {
     ctx.fillStyle = color;
@@ -573,11 +530,6 @@
     ctx.fill();
   }
 
-  function rankColor(rank, count) {
-    if (count <= 1) return COLORS[0];
-    const ratio = rank / (count - 1);
-    return mix(COLORS[0], COLORS[1], ratio);
-  }
 
   function mixColor(intensity) {
     return mix('#f5f4ee', '#28624d', intensity);
@@ -653,6 +605,8 @@
     canAnalyze,
     mapReport,
     tableRows,
+    viewSolutions,
+    minmaxNote,
     describeReport,
     inversionNote,
     mount,
