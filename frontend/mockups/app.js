@@ -289,6 +289,11 @@ function initializeLocalSettings() {
   }
 }
 
+function clearRobustness() {
+  state.robustness = null;
+  if (window.Robustness) Robustness.clear();
+}
+
 function applyInstanceSummary(instance) {
   const instanceName = document.querySelector('#instance-name');
   if (!instanceName) return;
@@ -326,6 +331,15 @@ function applyInstanceSummary(instance) {
   }
 
   document.querySelector('#start-run').disabled = !instance?.instance_id || ['queued', 'running', 'cancel_requested'].includes(state.activeRun?.status);
+  const robustnessButton = document.querySelector('#robustness-analysis');
+  if (robustnessButton && window.Robustness) {
+    robustnessButton.disabled = !Robustness.canAnalyze({
+      hasInstance: Boolean(instance?.instance_id),
+      resultIsDemo: state.resultIsDemo,
+      mappedCount: state.resultTotal,
+      runStatus: state.activeRun?.status,
+    });
+  }
   document.querySelector('#cancel-run').hidden = !['queued', 'running', 'cancel_requested'].includes(state.activeRun?.status);
   document.querySelector('.toolbar-date').textContent = state.activeRun?.updated_at
     ? new Date(state.activeRun.updated_at).toLocaleString('pt-BR')
@@ -376,12 +390,15 @@ async function loadInstances() {
         pollRun(state.activeRun.run_id);
       } else {
         state.resultIsDemo = false;
+        state.resultTotal = 0;
         state.solutions = [];
         state.frontiers = [];
         clearReferencePoints();
+        clearRobustness();
         renderSolutionTiming(null);
         await loadQualityEvolution(state.selectedInstanceId);
         renderTable();
+        applyInstanceSummary(state.instance);
       }
       return true;
     }
@@ -389,9 +406,11 @@ async function loadInstances() {
     state.activeRun = null;
     state.selectedInstanceId = null;
     state.resultIsDemo = false;
+    state.resultTotal = 0;
     state.solutions = [];
     state.frontiers = [];
     clearReferencePoints();
+    clearRobustness();
     resetQualityEvolution();
     renderSolutionTiming(null);
     updateInstanceCount();
@@ -405,7 +424,9 @@ async function loadInstances() {
     state.instance = null;
     state.selectedInstanceId = null;
     state.resultIsDemo = true;
+    state.resultTotal = 0;
     state.solutions = [...mockSolutions];
+    clearRobustness();
     state.frontiers = [];
     clearReferencePoints();
     resetQualityEvolution();
@@ -669,6 +690,7 @@ function approximateDisplay() {
 }
 
 async function loadRunResults(runId, offset) {
+  if (offset === 0) clearRobustness();
   const payload = await fetchJson(`/runs/${runId}/results?limit=${state.resultLimit}&offset=${offset}`);
   state.resultOffset = offset;
   state.tableOffset = 0;
@@ -717,6 +739,7 @@ async function loadRunResults(runId, offset) {
     Object.assign(document.createElement('span'), { className: 'metric-note', textContent: 'não dominadas' }),
   );
   renderSolutionTiming(payload.solution_timing);
+  applyInstanceSummary(state.instance);
   if (offset === 0 && state.selectedInstanceId) {
     await loadQualityEvolution(state.selectedInstanceId);
   }
@@ -750,7 +773,9 @@ async function pollRun(runId) {
           state.solutions = [];
           state.frontiers = [];
           clearReferencePoints();
+          clearRobustness();
           state.resultIsDemo = false;
+          state.resultTotal = 0;
           renderSolutionTiming(null);
           renderTable();
           if (run.status === 'failed') setApiStatus(run.error || 'A execução falhou.', true);
@@ -797,6 +822,7 @@ async function startRun() {
     state.solutions = [];
     state.frontiers = [];
     clearReferencePoints();
+    clearRobustness();
     state.resultIsDemo = false;
     state.resultTotal = 0;
     document.querySelector('#metric-solutions').replaceChildren(document.createTextNode('--'));
@@ -809,6 +835,45 @@ async function startRun() {
   } catch (error) {
     button.disabled = false;
     setApiStatus(`Não foi possível iniciar a otimização: ${error.message}`, true);
+  }
+}
+
+async function runRobustness() {
+  const button = document.querySelector('#robustness-analysis');
+  const panel = document.querySelector('#robustness-panel');
+  if (!state.selectedInstanceId || !button || button.disabled) return;
+  button.disabled = true;
+  const previousLabel = button.textContent;
+  button.textContent = 'Analisando robustez...';
+  if (panel) {
+    panel.hidden = false;
+    const status = panel.querySelector('#robustness-status');
+    if (status) status.textContent = 'Gerando perturbações da matriz de tempo e reavaliando as rotas já mapeadas.';
+  }
+  try {
+    const report = await fetchJson(`/instances/${state.selectedInstanceId}/robustness`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    state.robustness = report;
+    if (!window.Robustness || !Robustness.show(report)) {
+      if (panel) {
+        panel.hidden = false;
+        panel.querySelector('#robustness-status').textContent = 'A resposta da análise de robustez não pôde ser lida.';
+      }
+      return;
+    }
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    panel.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+  } catch (error) {
+    if (window.Robustness) Robustness.clear();
+    if (panel) {
+      panel.hidden = false;
+      panel.querySelector('#robustness-status').textContent = `Não foi possível concluir a análise de robustez: ${error.message}`;
+    }
+  } finally {
+    button.textContent = previousLabel;
+    applyInstanceSummary(state.instance);
   }
 }
 
@@ -2550,7 +2615,9 @@ document.querySelector('#problem-type').addEventListener('change', (event) => {
 });
 document.querySelector('#instance-form').addEventListener('submit', createInstance);
 document.querySelector('#start-run').addEventListener('click', startRun);
+document.querySelector('#robustness-analysis').addEventListener('click', runRobustness);
 document.querySelector('#cancel-run').addEventListener('click', cancelRun);
+if (window.Robustness) Robustness.mount(document.querySelector('#robustness-panel'));
 document.querySelector('#toggle-compare-solution').addEventListener('click', () => {
   if (selectedId) toggleComparison(selectedId);
 });
@@ -2692,6 +2759,7 @@ document.querySelector('#instance-selector').addEventListener('change', async (e
   const instanceId = event.target.value;
   if (!instanceId) return;
   pollingRunId = null;
+  clearRobustness();
   try {
     state.selectedInstanceId = instanceId;
     state.instance = await fetchJson(`/instances/${instanceId}`);
@@ -2712,9 +2780,11 @@ document.querySelector('#instance-selector').addEventListener('change', async (e
       state.frontiers = [];
       clearReferencePoints();
       state.resultIsDemo = false;
+      state.resultTotal = 0;
       renderSolutionTiming(null);
       await loadQualityEvolution(state.selectedInstanceId);
       renderTable();
+      applyInstanceSummary(state.instance);
       if (['queued', 'running', 'cancel_requested'].includes(state.activeRun?.status)) pollRun(state.activeRun.run_id);
     }
   } catch (error) {
