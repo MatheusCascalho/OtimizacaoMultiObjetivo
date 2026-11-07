@@ -64,5 +64,6 @@ services:
       - ./frontend/mockups/index.html:/usr/share/nginx/html/index.html:ro
       - ./frontend/mockups/styles.css:/usr/share/nginx/html/styles.css:ro
       - ./frontend/mockups/app.js:/usr/share/nginx/html/app.js:ro
+      - ./frontend/mockups/solution_compare.js:/usr/share/nginx/html/solution_compare.js:ro
       - ./frontend/mockups/quality_evolution.js:/usr/share/nginx/html/quality_evolution.js:ro
       - ./frontend/mockups/nginx.dev.conf:/etc/nginx/conf.d/default.conf:ro

@@ -755,6 +755,56 @@ def get_run_solution(run_id: str, solution_id: str):
     return jsonify(payload), 200
 
 
+def _matrix_value(matrix: tuple[tuple[float, ...], ...] | None, source: object, target: object) -> float | None:
+    if matrix is None:
+        return None
+    try:
+        row_index = int(source) - 1
+        column_index = int(target) - 1
+    except (TypeError, ValueError):
+        return None
+    if row_index < 0 or column_index < 0 or row_index >= len(matrix):
+        return None
+    row = matrix[row_index]
+    if column_index >= len(row):
+        return None
+    value = row[column_index]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if value != value or value in (float("inf"), float("-inf")):
+        return None
+    return float(value)
+
+
+def route_edges_with_objectives(
+    route: list,
+    time_matrix: tuple[tuple[float, ...], ...] | None = None,
+    distance_matrix: tuple[tuple[float, ...], ...] | None = None,
+) -> list[dict[str, int | float]]:
+    edges: list[dict[str, int | float]] = []
+    for index in range(len(route) - 1):
+        source = route[index]
+        target = route[index + 1]
+        edge: dict[str, int | float] = {"source": source, "target": target}
+        time_value = _matrix_value(time_matrix, source, target)
+        distance_value = _matrix_value(distance_matrix, source, target)
+        if time_value is not None:
+            edge["time"] = time_value
+        if distance_value is not None:
+            edge["distance"] = distance_value
+        edges.append(edge)
+    return edges
+
+
+def _optional_instance_matrix(instance_id: str, role: str):
+    try:
+        from api.routes.instances import _get_instance_matrix
+
+        return _get_instance_matrix(instance_id, role)
+    except Exception:
+        return None
+
+
 @runs_blueprint.get("/runs/<run_id>/solutions/<solution_id>/graph")
 def get_run_solution_graph(run_id: str, solution_id: str):
     engine = current_app.extensions["paretolab_database_engine"]
@@ -778,11 +828,11 @@ def get_run_solution_graph(run_id: str, solution_id: str):
             {"id": row.city_index + 1, "label": str(row.city_index + 1), "x": row.x, "y": row.y}
             for row in layout_rows
         ]
-        edges = []
-        for index in range(len(route) - 1):
-            source = route[index]
-            target = route[index + 1]
-            edges.append({"source": source, "target": target})
+        edges = route_edges_with_objectives(
+            route,
+            _optional_instance_matrix(solution.instance_id, "time_matrix"),
+            _optional_instance_matrix(solution.instance_id, "distance_matrix"),
+        )
         payload = {"solution_id": solution.solution_id, "route": route, "nodes": nodes, "edges": edges}
     return jsonify(payload), 200
 

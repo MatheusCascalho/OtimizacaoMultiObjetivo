@@ -7,6 +7,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from api import create_app
+from api.routes.runs import route_edges_with_objectives
 from api.settings import Settings
 from infrastructure.persistence.postgres.base import Base
 from infrastructure.persistence.postgres.models import CityLayout, Instance, Notification, Run, RunSolution
@@ -30,6 +31,23 @@ def app() -> Iterator[Flask]:
     application.config.update(TESTING=True)
     yield application
     test_engine.dispose()
+
+
+def test_route_edges_include_time_and_distance() -> None:
+    edges = route_edges_with_objectives(
+        [1, 2, 1],
+        time_matrix=((0.0, 1.5), (2.5, 0.0)),
+        distance_matrix=((0.0, 4.0), (8.0, 0.0)),
+    )
+
+    assert edges == [
+        {"source": 1, "target": 2, "time": 1.5, "distance": 4.0},
+        {"source": 2, "target": 1, "time": 2.5, "distance": 8.0},
+    ]
+
+
+def test_route_edges_omit_weights_when_matrices_are_missing() -> None:
+    assert route_edges_with_objectives([1, 2]) == [{"source": 1, "target": 2}]
 
 
 def test_results_and_notifications_are_exposed_for_completed_run(app: Flask) -> None:

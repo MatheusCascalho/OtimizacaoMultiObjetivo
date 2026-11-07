@@ -15,6 +15,7 @@
     <script src="hypervolume.js" defer></script>
     <script src="quality_evolution.js" defer></script>
     <script src="round_filter.js" defer></script>
+    <script src="solution_compare.js" defer></script>
     <script src="app.js" defer></script>
   </head>
   <body>
@@ -163,7 +164,7 @@
               <section class="chart-panel panel">
                 <div class="panel-heading chart-heading">
                   <div><p class="section-kicker">MAPA DE DECISÃO <span class="live-dot"></span></p><h2>Fronteira de Pareto</h2></div>
-                  <div class="chart-controls"><div class="segmented-control" role="tablist" aria-label="Visualização do gráfico"><button class="segment active" id="tab-frontier" type="button" role="tab" aria-selected="true" data-view="frontier">Fronteira</button><button class="segment" id="tab-all" type="button" role="tab" aria-selected="false" data-view="all">Todas</button></div><button class="button button-light" id="toggle-chart-expand" type="button" aria-pressed="false">Ampliar mapa</button><button class="icon-button chart-menu" type="button" aria-label="Opções do gráfico" title="Opções do gráfico">···</button></div>
+                  <div class="chart-controls"><div class="segmented-control" role="tablist" aria-label="Visualização do gráfico"><button class="segment active" id="tab-frontier" type="button" role="tab" aria-selected="true" data-view="frontier">Fronteira</button><button class="segment" id="tab-all" type="button" role="tab" aria-selected="false" data-view="all">Todas</button></div><button class="button button-primary compare-map-button" id="compare-solutions" type="button" hidden>Comparar soluções</button><button class="button button-light" id="toggle-chart-expand" type="button" aria-pressed="false">Ampliar mapa</button><button class="icon-button chart-menu" type="button" aria-label="Opções do gráfico" title="Opções do gráfico">···</button></div>
                 </div>
                 <div class="chart-legend"><span><i class="legend-dot coral-dot"></i>Distância <b>minimizar · km</b></span><span><i class="legend-dot blue-dot"></i>Tempo <b>minimizar · h</b></span><span class="demo-tag" id="data-mode-tag">DADOS ILUSTRATIVOS</span></div>
                 <div class="reference-controls" role="group" aria-label="Controles do mapa de decisão"><label class="reference-toggle"><input id="toggle-reference-points" type="checkbox" checked>Mostrar solução utópica e solução antiutópica</label><label class="reference-toggle"><input id="toggle-normalized-scale" type="checkbox">Escalarizar pelo utópico e pelo nadir</label><label class="reference-toggle"><input id="toggle-dominance-cone" type="checkbox" aria-describedby="cone-status">Exibir cone de dominância</label><label class="reference-toggle"><input id="toggle-approximate-frontier" type="checkbox">Exibir fronteira aproximada</label><label class="reference-toggle"><input id="toggle-hypervolume" type="checkbox" aria-describedby="hypervolume-status">Exibir hipervolume das rodadas</label><label class="reference-toggle"><input id="toggle-hypervolume-reference" type="checkbox">Exibir referência do hipervolume</label></div>
@@ -171,6 +172,7 @@
                 <p id="scale-status" class="map-mode-status" hidden>Os pontos de referência ainda não estão disponíveis para escalarizar o mapa.</p>
                 <p id="cone-status" class="map-mode-status" hidden>Selecione uma solução para exibir o cone de dominância.</p>
                 <p id="hypervolume-status" class="map-mode-status" hidden>O hipervolume ainda não está disponível para esta execução.</p>
+                <p id="compare-selection-status" class="map-mode-status" hidden></p>
                 <div class="chart-wrap">
                   <div class="y-axis-title" id="y-axis-title">Tempo (h) <span>↑</span></div>
                   <div class="chart-stage">
@@ -179,7 +181,7 @@
                   </div>
                   <div class="x-axis-title" id="x-axis-title">Distância (km) <span>→</span></div>
                 </div>
-                <div class="chart-footnote"><span id="frontier-round-legend" class="frontier-round-legend" hidden aria-label="Rodadas da fronteira de Pareto"></span><span id="single-frontier-key"><span class="key-dot frontier-key"></span>Não dominadas</span><span id="dominated-key"><span class="key-dot dominated-key"></span>Dominadas</span><span id="reference-key-utopian" hidden><span class="key-diamond" aria-hidden="true"></span>Solução utópica</span><span id="reference-key-antiutopian" hidden><span class="key-square" aria-hidden="true"></span>Solução antiutópica</span><span id="cone-key" hidden><span class="key-hatch" aria-hidden="true"></span>Cone de dominância</span><span id="approximate-frontier-key" hidden>Fronteira aproximada da união</span><span id="scale-key" hidden>0% no utópico, 100% no nadir</span><span id="hypervolume-key" hidden><span class="key-hatch" aria-hidden="true"></span>Área do hipervolume da rodada</span><span id="hypervolume-reference-key" hidden><span class="key-reference" aria-hidden="true"></span>Referência do hipervolume</span><span class="chart-footnote-right">Clique em um ponto para selecionar</span></div>
+                <div class="chart-footnote"><span id="frontier-round-legend" class="frontier-round-legend" hidden aria-label="Rodadas da fronteira de Pareto"></span><span id="single-frontier-key"><span class="key-dot frontier-key"></span>Não dominadas</span><span id="dominated-key"><span class="key-dot dominated-key"></span>Dominadas</span><span id="reference-key-utopian" hidden><span class="key-diamond" aria-hidden="true"></span>Solução utópica</span><span id="reference-key-antiutopian" hidden><span class="key-square" aria-hidden="true"></span>Solução antiutópica</span><span id="cone-key" hidden><span class="key-hatch" aria-hidden="true"></span>Cone de dominância</span><span id="approximate-frontier-key" hidden>Fronteira aproximada da união</span><span id="scale-key" hidden>0% no utópico, 100% no nadir</span><span id="hypervolume-key" hidden><span class="key-hatch" aria-hidden="true"></span>Área do hipervolume da rodada</span><span id="hypervolume-reference-key" hidden><span class="key-reference" aria-hidden="true"></span>Referência do hipervolume</span><span id="chart-selection-hint" class="chart-selection-hint">Clique para focar · Ctrl+clique compara</span></div>
               </section>
 
               <section class="solutions-panel panel">
@@ -198,6 +200,7 @@
                 <div class="selected-chart"><canvas id="route-chart" role="img" aria-label="Gráfico da rota selecionada; selecione Ver rota para carregar os dados"></canvas></div>
                 <div class="detail-metrics"><div class="detail-metric"><span><i class="legend-dot coral-dot"></i>Distância</span><strong id="selected-cost">-- km</strong></div><div class="detail-metric"><span><i class="legend-dot blue-dot"></i>Tempo</span><strong id="selected-coverage">-- h</strong></div><div class="detail-metric"><span>Cidades na rota</span><strong id="selected-items">--</strong></div></div>
                 <div class="reference-distance" id="reference-distance" role="group" aria-labelledby="reference-distance-heading" aria-live="polite" hidden><p class="metric-label" id="reference-distance-heading">Distância euclidiana normalizada</p><div id="reference-distance-values"><div class="detail-metric"><span>Até a solução utópica</span><strong id="distance-utopian">--</strong></div><div class="detail-metric"><span>Até a solução antiutópica</span><strong id="distance-antiutopian">--</strong></div></div><p class="reference-distance-note" id="reference-distance-note"></p></div>
+                <button class="button button-light compare-button" id="toggle-compare-solution" type="button" disabled aria-pressed="false">Incluir na comparação</button>
                 <button class="button button-primary compare-button" id="view-route" type="button" disabled><span aria-hidden="true">⌖</span> Ver rota</button>
                 <button class="button button-light compare-button" id="expand-route" type="button" disabled aria-haspopup="dialog" aria-controls="route-dialog">Expandir grafo</button>
                 <button class="button button-light compare-button route-download" id="download-route" type="button" disabled><span aria-hidden="true">↓</span> Baixar rota CSV</button>
@@ -281,6 +284,29 @@
         <canvas id="route-viewer-canvas" role="img" aria-label="Grafo ampliado da rota selecionada"></canvas>
       </div>
       <p class="route-viewer-hint" id="route-viewer-hint">Roda do mouse amplia o ponto sob o cursor. Arraste para deslocar o grafo. Zoom de 50% a 400%.</p>
+    </dialog>
+
+    <dialog class="instance-dialog route-graph-dialog" id="compare-dialog" aria-labelledby="compare-dialog-title" aria-describedby="compare-viewer-hint">
+      <div class="dialog-header">
+        <div>
+          <p class="section-kicker" id="compare-dialog-kicker">COMPARAÇÃO DE SOLUÇÕES</p>
+          <h2 id="compare-dialog-title">Rotas sobrepostas</h2>
+        </div>
+        <button class="icon-button dialog-close" id="close-compare-dialog" type="button" aria-label="Fechar comparação">×</button>
+      </div>
+      <p class="compare-note" id="compare-dialog-note"></p>
+      <ul id="compare-metrics" class="compare-metrics" aria-label="Métricas das soluções comparadas"></ul>
+      <div class="route-viewer-toolbar" role="toolbar" aria-label="Zoom da comparação">
+        <button class="button button-light" id="compare-zoom-out" type="button">Diminuir zoom</button>
+        <span class="route-zoom-readout" aria-live="polite"><span class="sr-only">Zoom atual: </span><span id="compare-zoom-level">100%</span></span>
+        <button class="button button-light" id="compare-zoom-in" type="button">Aumentar zoom</button>
+        <button class="button button-light" id="compare-zoom-reset" type="button">Tamanho original</button>
+      </div>
+      <div class="route-viewer-stage" id="compare-viewer-stage">
+        <canvas id="compare-canvas" role="img" aria-label="Rotas sobrepostas das soluções selecionadas"></canvas>
+        <div class="chart-tooltip" id="compare-tooltip" role="status" hidden></div>
+      </div>
+      <p class="route-viewer-hint" id="compare-viewer-hint">Passe o mouse sobre uma aresta para ver o tempo e a distância. A roda do mouse amplia o ponto sob o cursor. Arraste para deslocar. Zoom de 50% a 400%.</p>
     </dialog>
   </body>
 </html>

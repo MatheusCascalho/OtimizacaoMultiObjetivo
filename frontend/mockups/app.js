@@ -51,6 +51,9 @@ const state = {
   notifications: [],
   routeGraph: null,
   routeGraphKey: null,
+  comparedIds: [],
+  comparisonEntries: [],
+  comparisonIllustrative: false,
   showReferencePoints: true,
   showNormalizedScale: false,
   showDominanceCone: false,
@@ -1039,9 +1042,40 @@ function syncRoutePreview() {
 }
 
 const routeView = { zoom: 1, panX: 0, panY: 0 };
+const compareView = { zoom: 1, panX: 0, panY: 0 };
 const ROUTE_ZOOM_MIN = 0.5;
 const ROUTE_ZOOM_MAX = 4;
 let routePan = null;
+let comparePan = null;
+let comparisonHits = [];
+let comparisonRequest = 0;
+
+function routeLayout(nodes, width, height, labelAll) {
+  const inset = labelAll ? 28 : 18;
+  let plotWidth = width - inset * 2;
+  let plotHeight = height - inset * 2;
+  if (labelAll) {
+    plotWidth = Math.max(1, plotWidth);
+    plotHeight = Math.max(1, plotHeight);
+  }
+  const xValues = nodes.map((node) => node.x);
+  const yValues = nodes.map((node) => node.y);
+  const minX = Math.min(...xValues);
+  const maxX = Math.max(...xValues);
+  const minY = Math.min(...yValues);
+  const maxY = Math.max(...yValues);
+  const spanX = Math.max(1, maxX - minX);
+  const spanY = Math.max(1, maxY - minY);
+  const pointFor = (nodeId) => {
+    const node = nodes.find((item) => item.id === nodeId);
+    if (!node) return null;
+    return {
+      x: inset + ((node.x - minX) / spanX) * plotWidth,
+      y: inset + ((node.y - minY) / spanY) * plotHeight,
+    };
+  };
+  return { pointFor };
+}
 
 function drawRouteGraph(graph, routeCanvas = document.querySelector('#route-chart'), view) {
   const zoom = view?.zoom ?? 1;
@@ -1066,27 +1100,7 @@ function drawRouteGraph(graph, routeCanvas = document.querySelector('#route-char
   if (zoom !== 1 || panX !== 0 || panY !== 0) {
     context.setTransform(ratio * zoom, 0, 0, ratio * zoom, ratio * panX, ratio * panY);
   }
-  const inset = labelAll ? 28 : 18;
-  let plotWidth = bounds.width - inset * 2;
-  let plotHeight = bounds.height - inset * 2;
-  if (labelAll) {
-    plotWidth = Math.max(1, plotWidth);
-    plotHeight = Math.max(1, plotHeight);
-  }
-  const xValues = nodes.map((node) => node.x);
-  const yValues = nodes.map((node) => node.y);
-  const minX = Math.min(...xValues);
-  const maxX = Math.max(...xValues);
-  const minY = Math.min(...yValues);
-  const maxY = Math.max(...yValues);
-  const pointFor = (nodeId) => {
-    const node = nodes.find((item) => item.id === nodeId);
-    if (!node) return null;
-    return {
-      x: inset + ((node.x - minX) / Math.max(1, maxX - minX)) * plotWidth,
-      y: inset + ((node.y - minY) / Math.max(1, maxY - minY)) * plotHeight,
-    };
-  };
+  const { pointFor } = routeLayout(nodes, bounds.width, bounds.height, labelAll);
 
   (graph.edges || []).forEach((edge) => {
     const source = pointFor(edge.source);
@@ -1191,6 +1205,332 @@ function openRouteViewer() {
   window.requestAnimationFrame(drawExpandedRoute);
 }
 
+function syncComparisonControls() {
+  if (window.SolutionCompare) {
+    const known = new Set(unionChartSolutions().map((item) => item.id));
+    state.comparedIds = state.comparedIds.filter((id) => known.has(id));
+  }
+  const button = document.querySelector('#compare-solutions');
+  const status = document.querySelector('#compare-selection-status');
+  const includeButton = document.querySelector('#toggle-compare-solution');
+  const count = state.comparedIds.length;
+  if (button && !button.dataset.loading) {
+    button.hidden = count < 2;
+    button.disabled = false;
+    button.textContent = 'Comparar soluções';
+  }
+  if (status) {
+    if (!count || !window.SolutionCompare) {
+      status.hidden = true;
+      status.textContent = '';
+    } else if (count === 1) {
+      const style = SolutionCompare.comparisonStyle(0);
+      status.hidden = false;
+      status.textContent = `1 solução marcada (${style.patternLabel}). Ctrl+clique em outra solução do mapa para comparar.`;
+    } else {
+      const summary = state.comparedIds.map((id, index) => {
+        const style = SolutionCompare.comparisonStyle(index);
+        return `Solução ${id}, ${style.patternLabel}`;
+      }).join('; ');
+      status.hidden = false;
+      status.textContent = `${count} soluções na comparação: ${summary}.`;
+    }
+  }
+  if (includeButton) {
+    const solution = findDisplayedSolution(selectedId);
+    const included = Boolean(solution) && state.comparedIds.includes(solution.id);
+    includeButton.disabled = !solution;
+    includeButton.textContent = included ? 'Remover da comparação' : 'Incluir na comparação';
+    includeButton.setAttribute('aria-pressed', String(included));
+  }
+}
+
+function toggleComparison(id) {
+  const solution = findDisplayedSolution(id);
+  if (!solution || !window.SolutionCompare) return;
+  const adding = !state.comparedIds.includes(id);
+  state.comparedIds = SolutionCompare.toggleComparedId(state.comparedIds, id);
+  if (adding) selectSolution(id);
+  else renderTable();
+}
+
+async function withEdgeWeights(entries) {
+  const missing = entries.some((entry) => (entry.graph.edges || []).some((edge) => edge.time == null || edge.distance == null));
+  if (!missing || !state.selectedInstanceId) return entries;
+  let timeMatrix = null;
+  let distanceMatrix = null;
+  try {
+    [timeMatrix, distanceMatrix] = await Promise.all([
+      fetchJson(`/instances/${state.selectedInstanceId}/analysis/input/matrix?objective=time`),
+      fetchJson(`/instances/${state.selectedInstanceId}/analysis/input/matrix?objective=distance`),
+    ]);
+  } catch {
+    return entries;
+  }
+  return entries.map((entry) => ({
+    ...entry,
+    graph: {
+      ...entry.graph,
+      edges: (entry.graph.edges || []).map((edge) => ({
+        ...edge,
+        time: edge.time ?? SolutionCompare.matrixValue(timeMatrix, edge.source, edge.target),
+        distance: edge.distance ?? SolutionCompare.matrixValue(distanceMatrix, edge.source, edge.target),
+      })),
+    },
+  }));
+}
+
+function renderComparisonSummary() {
+  const entries = state.comparisonEntries || [];
+  document.querySelector('#compare-dialog-kicker').textContent = state.comparisonIllustrative
+    ? 'COMPARAÇÃO · DADOS ILUSTRATIVOS'
+    : 'COMPARAÇÃO DE SOLUÇÕES';
+  document.querySelector('#compare-dialog-note').textContent = state.comparisonIllustrative
+    ? 'Rotas de exemplo do protótipo. O tempo e a distância de cada aresta repartem os totais da solução.'
+    : 'Cada solução usa uma cor e um traço. Passe o mouse sobre uma aresta para ler o tempo e a distância daquele arco.';
+  const list = document.querySelector('#compare-metrics');
+  list.replaceChildren(...entries.map((entry, index) => {
+    const style = SolutionCompare.comparisonStyle(index);
+    const item = document.createElement('li');
+    const swatch = document.createElement('i');
+    swatch.className = 'compare-swatch';
+    swatch.style.color = style.color;
+    swatch.style.borderTopStyle = style.dash.length ? 'dashed' : 'solid';
+    swatch.setAttribute('aria-hidden', 'true');
+    const name = document.createElement('strong');
+    name.textContent = `Solução ${entry.solution.id}`;
+    const pattern = document.createElement('span');
+    pattern.className = 'sr-only';
+    pattern.textContent = style.patternLabel;
+    const distance = document.createElement('span');
+    distance.textContent = `Distância ${SolutionCompare.formatObjective(entry.solution.cost, 'km')}`;
+    const time = document.createElement('span');
+    time.textContent = `Tempo ${SolutionCompare.formatObjective(entry.solution.coverage, 'h')}`;
+    item.append(swatch, name, pattern, distance, time);
+    return item;
+  }));
+}
+
+function updateCompareZoomControls() {
+  const percent = `${Math.round(compareView.zoom * 100)}%`;
+  document.querySelector('#compare-zoom-level').textContent = percent;
+  document.querySelector('#compare-zoom-out').disabled = compareView.zoom <= ROUTE_ZOOM_MIN + 0.001;
+  document.querySelector('#compare-zoom-in').disabled = compareView.zoom >= ROUTE_ZOOM_MAX - 0.001;
+}
+
+function drawComparisonGraph() {
+  const dialog = document.querySelector('#compare-dialog');
+  const canvas = document.querySelector('#compare-canvas');
+  if (!dialog?.open || !canvas) return;
+  const bounds = canvas.getBoundingClientRect();
+  if (bounds.width < 2 || bounds.height < 2) return;
+  const context = canvas.getContext('2d');
+  const ratio = window.devicePixelRatio || 1;
+  const zoom = compareView.zoom;
+  const panX = compareView.panX;
+  const panY = compareView.panY;
+  canvas.width = Math.max(1, Math.round(bounds.width * ratio));
+  canvas.height = Math.max(1, Math.round(bounds.height * ratio));
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  context.clearRect(0, 0, bounds.width, bounds.height);
+  comparisonHits = [];
+  const entries = state.comparisonEntries || [];
+  const nodes = entries.reduce((best, entry) => {
+    const candidate = entry.graph.nodes || [];
+    return candidate.length > best.length ? candidate : best;
+  }, []);
+  if (!nodes.length) {
+    context.fillStyle = '#78817b';
+    context.font = '12px "DM Sans", sans-serif';
+    context.fillText('Layout da instância indisponível', 16, 28);
+    canvas.setAttribute('aria-label', 'Comparação sem layout de cidades');
+    return;
+  }
+  if (zoom !== 1 || panX !== 0 || panY !== 0) {
+    context.setTransform(ratio * zoom, 0, 0, ratio * zoom, ratio * panX, ratio * panY);
+  }
+  const { pointFor } = routeLayout(nodes, bounds.width, bounds.height, true);
+  entries.forEach((entry, index) => {
+    const style = SolutionCompare.comparisonStyle(index);
+    const offset = (index - (entries.length - 1) / 2) * 4;
+    context.strokeStyle = style.color;
+    context.lineWidth = 2.2;
+    context.setLineDash(style.dash);
+    (entry.graph.edges || []).forEach((edge) => {
+      const source = pointFor(edge.source);
+      const target = pointFor(edge.target);
+      if (!source || !target) return;
+      const shifted = SolutionCompare.offsetSegment(source, target, offset);
+      context.beginPath();
+      context.moveTo(shifted.source.x, shifted.source.y);
+      context.lineTo(shifted.target.x, shifted.target.y);
+      context.stroke();
+      comparisonHits.push({
+        source: shifted.source,
+        target: shifted.target,
+        time: edge.time,
+        distance: edge.distance,
+        from: edge.source,
+        to: edge.target,
+        solution: entry.solution,
+      });
+    });
+  });
+  context.setLineDash([]);
+  nodes.forEach((node) => {
+    const point = pointFor(node.id);
+    if (!point) return;
+    context.beginPath();
+    context.arc(point.x, point.y, 4.2, 0, Math.PI * 2);
+    context.fillStyle = '#28624d';
+    context.fill();
+    context.save();
+    context.translate(point.x, point.y);
+    context.scale(1 / zoom, 1 / zoom);
+    context.fillStyle = '#182b25';
+    context.font = '12px "IBM Plex Mono", monospace';
+    context.fillText(String(node.label ?? node.id), 6, -6);
+    context.restore();
+  });
+  entries.forEach((entry, index) => {
+    const origin = pointFor(entry.graph.route?.[0]);
+    if (!origin) return;
+    const style = SolutionCompare.comparisonStyle(index);
+    context.beginPath();
+    context.arc(origin.x, origin.y, 7 + index * 2, 0, Math.PI * 2);
+    context.strokeStyle = style.color;
+    context.lineWidth = 1.6;
+    context.stroke();
+  });
+  const labels = entries.map((entry) => entry.solution.id).join(', ');
+  canvas.setAttribute('aria-label', labels
+    ? `Rotas sobrepostas das soluções ${labels}`
+    : 'Rotas sobrepostas das soluções selecionadas');
+}
+
+function zoomComparisonTo(nextZoom, originX, originY) {
+  const zoom = Math.min(ROUTE_ZOOM_MAX, Math.max(ROUTE_ZOOM_MIN, nextZoom));
+  if (Math.abs(zoom - compareView.zoom) < 0.0001) {
+    updateCompareZoomControls();
+    return;
+  }
+  const worldX = (originX - compareView.panX) / compareView.zoom;
+  const worldY = (originY - compareView.panY) / compareView.zoom;
+  compareView.zoom = zoom;
+  compareView.panX = originX - worldX * zoom;
+  compareView.panY = originY - worldY * zoom;
+  updateCompareZoomControls();
+  drawComparisonGraph();
+}
+
+function compareViewerCenter() {
+  const bounds = document.querySelector('#compare-canvas').getBoundingClientRect();
+  return { x: bounds.width / 2, y: bounds.height / 2 };
+}
+
+function resetCompareZoom() {
+  compareView.zoom = 1;
+  compareView.panX = 0;
+  compareView.panY = 0;
+  updateCompareZoomControls();
+  drawComparisonGraph();
+}
+
+function openComparisonDialog() {
+  compareView.zoom = 1;
+  compareView.panX = 0;
+  compareView.panY = 0;
+  renderComparisonSummary();
+  updateCompareZoomControls();
+  const dialog = document.querySelector('#compare-dialog');
+  if (!dialog.open) dialog.showModal();
+  document.querySelector('#compare-zoom-out').focus();
+  window.requestAnimationFrame(drawComparisonGraph);
+}
+
+function showComparisonTooltip(hit, screenX, screenY) {
+  const tooltip = document.querySelector('#compare-tooltip');
+  const stage = document.querySelector('#compare-viewer-stage');
+  tooltip.replaceChildren();
+  const title = document.createElement('strong');
+  title.textContent = `Aresta ${hit.from} → ${hit.to}`;
+  const solution = document.createElement('span');
+  solution.textContent = `Solução ${hit.solution.id}`;
+  const distance = document.createElement('span');
+  distance.textContent = `Distância: ${SolutionCompare.formatObjective(hit.distance, 'km')}`;
+  const time = document.createElement('span');
+  time.textContent = `Tempo: ${SolutionCompare.formatObjective(hit.time, 'h')}`;
+  tooltip.append(title, solution, distance, time);
+  tooltip.hidden = false;
+  tooltip.style.left = `${Math.min(screenX + 12, Math.max(8, stage.clientWidth - 190))}px`;
+  tooltip.style.top = `${Math.max(8, Math.min(screenY - 56, stage.clientHeight - 84))}px`;
+}
+
+function hoverComparisonEdge(event) {
+  const tooltip = document.querySelector('#compare-tooltip');
+  if (comparePan || !window.SolutionCompare) {
+    tooltip.hidden = true;
+    return;
+  }
+  const canvas = document.querySelector('#compare-canvas');
+  const bounds = canvas.getBoundingClientRect();
+  const screenX = event.clientX - bounds.left;
+  const screenY = event.clientY - bounds.top;
+  const hit = SolutionCompare.nearestEdge({
+    x: (screenX - compareView.panX) / compareView.zoom,
+    y: (screenY - compareView.panY) / compareView.zoom,
+  }, comparisonHits, 8 / compareView.zoom);
+  if (!hit.edge) {
+    tooltip.hidden = true;
+    return;
+  }
+  showComparisonTooltip(hit.edge, screenX, screenY);
+}
+
+function endComparePan(event) {
+  if (!comparePan || (event && comparePan.id !== event.pointerId)) return;
+  comparePan = null;
+  document.querySelector('#compare-canvas').classList.remove('is-panning');
+}
+
+async function openComparison() {
+  if (!window.SolutionCompare || state.comparedIds.length < 2) return;
+  const ids = state.comparedIds.slice();
+  const requestId = ++comparisonRequest;
+  const button = document.querySelector('#compare-solutions');
+  button.dataset.loading = '1';
+  button.disabled = true;
+  button.textContent = 'Carregando rotas...';
+  try {
+    const entries = await Promise.all(ids.map(async (id) => {
+      const solution = findDisplayedSolution(id);
+      if (!solution) throw new Error(`A solução ${id} não está mais no mapa.`);
+      if (state.resultIsDemo) return { solution, graph: SolutionCompare.illustrativeGraph(solution) };
+      if (!solution.solutionId || !state.activeRun?.run_id) {
+        throw new Error(`A solução ${solution.id} não tem rota disponível.`);
+      }
+      const graph = await fetchJson(`/runs/${state.activeRun.run_id}/solutions/${solution.solutionId}/graph`);
+      return { solution, graph };
+    }));
+    if (requestId !== comparisonRequest) return;
+    const weighted = state.resultIsDemo ? entries : await withEdgeWeights(entries);
+    if (requestId !== comparisonRequest) return;
+    state.comparisonEntries = weighted;
+    state.comparisonIllustrative = weighted.some((entry) => entry.graph.illustrative);
+    openComparisonDialog();
+  } catch (error) {
+    if (requestId === comparisonRequest) {
+      setApiStatus(`Não foi possível comparar as soluções: ${error.message}`, true);
+    }
+  } finally {
+    if (requestId === comparisonRequest) {
+      delete button.dataset.loading;
+      button.textContent = 'Comparar soluções';
+      syncComparisonControls();
+    }
+  }
+}
+
 function endRoutePan(event) {
   if (!routePan || (event && routePan.id !== event.pointerId)) return;
   routePan = null;
@@ -1230,6 +1570,7 @@ let plottedPoints = [];
 let plottedReferences = [];
 
 function renderTable() {
+  syncComparisonControls();
   const query = searchInput.value.trim().toLowerCase();
   const approximate = approximateDisplay();
   const source = filterVisibleRoundSolutions(approximate ? approximate.solutions : state.solutions);
@@ -1243,14 +1584,21 @@ function renderTable() {
     state.tableOffset = Math.max(0, Math.floor((visibleSolutions.length - 1) / state.tablePageSize) * state.tablePageSize);
   }
   const pageSolutions = visibleSolutions.slice(state.tableOffset, state.tableOffset + state.tablePageSize);
-  tableBody.innerHTML = pageSolutions.map((solution) => `
-    <tr class="${solution.id === selectedId ? 'selected-row' : ''}" data-solution="${solution.id}" tabindex="0" aria-selected="${solution.id === selectedId}">
-      <td><span class="table-id">SOL-${solution.id}</span></td>
+  tableBody.innerHTML = pageSolutions.map((solution) => {
+    const comparedIndex = state.comparedIds.indexOf(solution.id);
+    const style = comparedIndex >= 0 && window.SolutionCompare ? SolutionCompare.comparisonStyle(comparedIndex) : null;
+    const swatch = style
+      ? `<i class="compare-row-swatch" style="border-top-color:${style.color};border-top-style:${style.dash.length ? 'dashed' : 'solid'}" aria-hidden="true"></i>`
+      : '';
+    return `
+    <tr class="${solution.id === selectedId ? 'selected-row' : ''}${style ? ' compared-row' : ''}" data-solution="${solution.id}" tabindex="0" aria-selected="${solution.id === selectedId}">
+      <td><span class="table-id">${swatch}SOL-${solution.id}</span></td>
       <td><span class="table-number">${solution.cost.toFixed(2)} km</span></td>
       <td><span class="table-number">${solution.coverage.toFixed(2)} h</span></td>
       <td><span class="status-pill ${(approximate ? approximate.frontierIds.has(solution.id) : solution.frontier) ? 'frontier' : 'dominated'}">${(approximate ? approximate.frontierIds.has(solution.id) : solution.frontier) ? 'Não dominada' : 'Dominada'}</span>${solution.round ? `<span class="round-label">Rodada ${solution.round}</span>` : ''}</td>
       <td class="row-arrow" aria-hidden="true">↗</td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 
   const shown = pageSolutions.length;
   const tableSummary = document.querySelector('#table-summary');
@@ -1501,6 +1849,17 @@ function drawChart() {
       chartContext.strokeStyle = multiRound ? 'rgb(24 43 37 / 28%)' : 'rgb(217 101 69 / 27%)';
       chartContext.lineWidth = 4;
       chartContext.stroke();
+    }
+    const comparedIndex = state.comparedIds.indexOf(solution.id);
+    if (comparedIndex >= 0 && window.SolutionCompare) {
+      const style = SolutionCompare.comparisonStyle(comparedIndex);
+      chartContext.beginPath();
+      chartContext.setLineDash(style.dash);
+      chartContext.arc(px, py, isSelected ? 14 : 9, 0, Math.PI * 2);
+      chartContext.strokeStyle = style.color;
+      chartContext.lineWidth = 1.7;
+      chartContext.stroke();
+      chartContext.setLineDash([]);
     }
   });
   hypervolumeLabels.forEach((label) => {
@@ -2087,7 +2446,12 @@ function setView(view) {
 
 tableBody.addEventListener('click', (event) => {
   const row = event.target.closest('tr[data-solution]');
-  if (row) selectSolution(row.dataset.solution);
+  if (!row) return;
+  if (event.ctrlKey || event.metaKey) {
+    toggleComparison(row.dataset.solution);
+    return;
+  }
+  selectSolution(row.dataset.solution);
 });
 
 tableBody.addEventListener('keydown', (event) => {
@@ -2095,7 +2459,8 @@ tableBody.addEventListener('keydown', (event) => {
   const row = event.target.closest('tr[data-solution]');
   if (!row) return;
   event.preventDefault();
-  selectSolution(row.dataset.solution);
+  if (event.ctrlKey || event.metaKey) toggleComparison(row.dataset.solution);
+  else selectSolution(row.dataset.solution);
 });
 
 document.querySelectorAll('.segment').forEach((button) => button.addEventListener('click', () => setView(button.dataset.view)));
@@ -2144,7 +2509,12 @@ chart.addEventListener('click', (event) => {
   const rect = chart.getBoundingClientRect();
   const pointer = { x: event.clientX - rect.left, y: event.clientY - rect.top };
   const hit = chartHit(pointer);
-  if (hit && hit.kind !== 'reference') selectSolution(hit.solution.id);
+  if (!hit || hit.kind === 'reference') return;
+  if (event.ctrlKey || event.metaKey) {
+    toggleComparison(hit.solution.id);
+    return;
+  }
+  selectSolution(hit.solution.id);
 });
 
 document.querySelector('#export-csv').addEventListener('click', () => {
@@ -2181,6 +2551,10 @@ document.querySelector('#problem-type').addEventListener('change', (event) => {
 document.querySelector('#instance-form').addEventListener('submit', createInstance);
 document.querySelector('#start-run').addEventListener('click', startRun);
 document.querySelector('#cancel-run').addEventListener('click', cancelRun);
+document.querySelector('#toggle-compare-solution').addEventListener('click', () => {
+  if (selectedId) toggleComparison(selectedId);
+});
+document.querySelector('#compare-solutions').addEventListener('click', openComparison);
 document.querySelector('#view-route').addEventListener('click', showSelectedRoute);
 document.querySelector('#expand-route').addEventListener('click', openRouteViewer);
 document.querySelector('#download-route').addEventListener('click', downloadSelectedRoute);
@@ -2227,6 +2601,59 @@ document.querySelector('#route-viewer-canvas').addEventListener('pointermove', (
 });
 document.querySelector('#route-viewer-canvas').addEventListener('pointerup', endRoutePan);
 document.querySelector('#route-viewer-canvas').addEventListener('pointercancel', endRoutePan);
+document.querySelector('#close-compare-dialog').addEventListener('click', () => {
+  document.querySelector('#compare-dialog').close();
+});
+document.querySelector('#compare-dialog').addEventListener('close', () => {
+  endComparePan();
+  document.querySelector('#compare-tooltip').hidden = true;
+  const compareButton = document.querySelector('#compare-solutions');
+  const includeButton = document.querySelector('#toggle-compare-solution');
+  if (compareButton && !compareButton.hidden) compareButton.focus();
+  else if (includeButton && !includeButton.disabled) includeButton.focus();
+});
+document.querySelector('#compare-zoom-out').addEventListener('click', () => {
+  const origin = compareViewerCenter();
+  zoomComparisonTo(compareView.zoom / 1.25, origin.x, origin.y);
+});
+document.querySelector('#compare-zoom-in').addEventListener('click', () => {
+  const origin = compareViewerCenter();
+  zoomComparisonTo(compareView.zoom * 1.25, origin.x, origin.y);
+});
+document.querySelector('#compare-zoom-reset').addEventListener('click', resetCompareZoom);
+document.querySelector('#compare-viewer-stage').addEventListener('wheel', (event) => {
+  const dialog = document.querySelector('#compare-dialog');
+  if (!dialog.open) return;
+  event.preventDefault();
+  let delta = event.deltaY;
+  if (event.deltaMode === 1) delta *= 16;
+  else if (event.deltaMode === 2) delta *= document.querySelector('#compare-canvas').getBoundingClientRect().height;
+  if (!delta) return;
+  const bounds = document.querySelector('#compare-canvas').getBoundingClientRect();
+  zoomComparisonTo(compareView.zoom * Math.exp(-delta * 0.0018), event.clientX - bounds.left, event.clientY - bounds.top);
+}, { passive: false });
+document.querySelector('#compare-canvas').addEventListener('pointerdown', (event) => {
+  if (event.button !== 0) return;
+  const canvas = event.currentTarget;
+  canvas.setPointerCapture(event.pointerId);
+  comparePan = { id: event.pointerId, x: event.clientX, y: event.clientY, panX: compareView.panX, panY: compareView.panY };
+  canvas.classList.add('is-panning');
+  document.querySelector('#compare-tooltip').hidden = true;
+});
+document.querySelector('#compare-canvas').addEventListener('pointermove', (event) => {
+  if (comparePan && comparePan.id === event.pointerId) {
+    compareView.panX = comparePan.panX + (event.clientX - comparePan.x);
+    compareView.panY = comparePan.panY + (event.clientY - comparePan.y);
+    drawComparisonGraph();
+    return;
+  }
+  hoverComparisonEdge(event);
+});
+document.querySelector('#compare-canvas').addEventListener('pointerup', endComparePan);
+document.querySelector('#compare-canvas').addEventListener('pointercancel', endComparePan);
+document.querySelector('#compare-canvas').addEventListener('pointerleave', () => {
+  document.querySelector('#compare-tooltip').hidden = true;
+});
 document.querySelector('#notifications-button').addEventListener('click', async () => {
   await loadNotifications();
   document.querySelector('#notifications-dialog').showModal();
@@ -2324,4 +2751,8 @@ const routeResizeObserver = new ResizeObserver(() => {
   if (document.querySelector('#route-dialog').open) drawExpandedRoute();
 });
 routeResizeObserver.observe(document.querySelector('#route-viewer-stage'));
+const compareResizeObserver = new ResizeObserver(() => {
+  if (document.querySelector('#compare-dialog').open) drawComparisonGraph();
+});
+compareResizeObserver.observe(document.querySelector('#compare-viewer-stage'));
 initializeDashboard();
