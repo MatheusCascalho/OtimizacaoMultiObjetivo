@@ -12,6 +12,8 @@
   const COLUMNS = [
     { id: 'name', label: 'Solução', numeric: false },
     { id: 'distance', label: 'Distância', title: 'Distância da rota, em quilômetros' },
+    { id: 'co2Kg', label: 'CO2 (kg)', title: 'Emissão de CO2 calculada para a solução, em quilogramas' },
+    { id: 'speedEmissionFactor', label: 'Fator de emissão de velocidade', title: 'Média dos fatores de velocidade dos arcos, ponderada pela distância' },
     { id: 'nominal', label: 'Tempo nominal', title: 'Tempo da rota com a matriz nominal, em horas' },
     { id: 'mean', label: 'Média', title: 'Média do tempo simulado, em horas' },
     { id: 'cv', label: 'CV', title: 'Desvio-padrão dividido pela média do tempo simulado' },
@@ -36,16 +38,19 @@
     return Number(mappedCount) > 0;
   }
 
-  function mapReport(payload) {
+  function mapReport(payload, emissionsBySolution = {}) {
     if (!payload || !Array.isArray(payload.solutions) || !payload.solutions.length) return null;
     const solutions = payload.solutions.map((solution, index) => {
       const box = solution && solution.boxplot;
+      const emission = solution && emissionsBySolution[solution.solution_id];
       return {
         id: solution.solution_id || `s${index + 1}`,
         name: solutionName(solution.solution_id, index),
         label: solution.label || `S${index + 1}`,
         color: COLORS[index % COLORS.length],
         distance: finite(solution.distance),
+        co2Kg: finite(emission && emission.co2_kg),
+        speedEmissionFactor: finite(emission && emission.total_speed_emission_factor),
         nominalTime: finite(solution.nominal_time),
         mean: finite(solution.mean),
         coefficientOfVariation: finite(solution.coefficient_of_variation),
@@ -104,6 +109,8 @@
     return [
       solution.name,
       formatNumber(solution.distance, 2),
+      formatNumber(solution.co2Kg, 2),
+      formatNumber(solution.speedEmissionFactor, 3),
       formatNumber(solution.nominalTime, 2),
       formatNumber(solution.mean, 2),
       formatNumber(solution.coefficientOfVariation, 3),
@@ -227,8 +234,8 @@
     });
   }
 
-  function show(payload) {
-    const report = mapReport(payload);
+  function show(payload, emissionsBySolution) {
+    const report = mapReport(payload, emissionsBySolution);
     if (!report || !panel) return false;
     activeReport = report;
     tableQuery = '';

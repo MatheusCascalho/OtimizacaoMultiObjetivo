@@ -155,6 +155,28 @@ def test_emissions_return_the_speed_factor_of_each_solution(app: Flask) -> None:
     assert "heatmap" not in by_id["sol_a"]
 
 
+def test_heatmap_scale_covers_every_solution_at_the_requested_resolution(app: Flask) -> None:
+    with Session(app.extensions["paretolab_database_engine"]) as session:
+        _seed(session)
+
+    client = app.test_client()
+    scale_response = client.get(
+        "/api/v1/runs/run_emission/emissions/heatmap-scale?resolution=32",
+    )
+    maps = [
+        client.get(f"/api/v1/runs/run_emission/solutions/{solution_id}/emission?resolution=32").json["heatmap"]["grid"]
+        for solution_id in ("sol_a", "sol_b")
+    ]
+
+    assert scale_response.status_code == 200
+    scale = scale_response.json
+    values = [value for grid in maps for row in grid for value in row]
+    assert scale["unit"] == "kg"
+    assert scale["resolution"] == 32
+    assert scale["min"] == pytest.approx(min(values))
+    assert scale["max"] == pytest.approx(max(values))
+
+
 def test_solution_emission_returns_the_smoothed_density(app: Flask) -> None:
     with Session(app.extensions["paretolab_database_engine"]) as session:
         _seed(session)

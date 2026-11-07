@@ -211,6 +211,76 @@ def list_solution_emissions(run_id: str):
     return jsonify(payload), 200
 
 
+@emission_blueprint.get("/runs/<run_id>/emissions/heatmap-scale")
+def get_run_emission_heatmap_scale(run_id: str):
+    fe_base, error = _fe_base()
+    if error is not None:
+        return error
+    resolution, error = _resolution()
+    if error is not None:
+        return error
+    engine = current_app.extensions["paretolab_database_engine"]
+    with Session(engine) as session:
+        run, error = _completed_run(session, run_id)
+        if error is not None:
+            return error
+        rows = session.scalars(
+            select(RunSolution)
+            .where(RunSolution.run_id == run_id)
+            .order_by(RunSolution.solution_id.asc())
+        ).all()
+        instance_id = run.instance_id
+        nodes = _layout(session, instance_id)
+        routes = [list(row.route or []) for row in rows]
+    matrices, error = _matrices_or_error(instance_id)
+    if error is not None:
+        return error
+    time_matrix, distance_matrix = matrices
+
+    minimum = float("inf")
+    maximum = float("-inf")
+    for route in routes:
+        try:
+            emission = evaluate_route_emission(
+                route,
+                distance_matrix,
+                time_matrix,
+                nodes=nodes,
+                fe_base_kg_per_km=fe_base,
+                close_cycle=True,
+                include_heatmap=True,
+                resolution=resolution,
+            )
+        except EmissionError as error:
+            return _error("invalid_route", str(error), 422)
+        heatmap = emission["heatmap"]
+        if not isinstance(heatmap, dict):
+            continue
+        for row in heatmap["grid"]:
+            for value in row:
+                number = _json_number(value)
+                if number is None:
+                    continue
+                minimum = min(minimum, number)
+                maximum = max(maximum, number)
+
+    if minimum == float("inf") or maximum == float("-inf"):
+        return _error(
+            "heatmap_unavailable",
+            "Não foi possível calcular uma escala comum para os heatmaps desta execução.",
+            422,
+        )
+    return jsonify(
+        {
+            "run_id": run_id,
+            "unit": "kg",
+            "resolution": resolution,
+            "min": minimum,
+            "max": maximum,
+        }
+    ), 200
+
+
 @emission_blueprint.get("/runs/<run_id>/solutions/<solution_id>/emission")
 def get_solution_emission(run_id: str, solution_id: str):
     fe_base, error = _fe_base()

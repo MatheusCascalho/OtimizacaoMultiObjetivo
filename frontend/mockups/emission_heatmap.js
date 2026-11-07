@@ -21,7 +21,7 @@
     [242, 230, 97],
     [252, 255, 164],
   ];
-  let rasterCache = { heatmap: null, canvas: null };
+  let rasterCache = { heatmap: null, scale: null, canvas: null };
 
   function infernoColor(intensity) {
     const clamped = Math.min(1, Math.max(0, Number(intensity) || 0));
@@ -88,7 +88,19 @@
     return rows;
   }
 
-  function densityRange(grid) {
+  function isValidScale(scale) {
+    return scale
+      && typeof scale.min === 'number'
+      && Number.isFinite(scale.min)
+      && typeof scale.max === 'number'
+      && Number.isFinite(scale.max)
+      && scale.min <= scale.max;
+  }
+
+  function densityRange(grid, sharedScale) {
+    if (isValidScale(sharedScale)) {
+      return { min: Number(sharedScale.min), max: Number(sharedScale.max) };
+    }
     let min = Infinity;
     let max = -Infinity;
     grid.forEach((row) => {
@@ -103,12 +115,16 @@
     return { min, max };
   }
 
-  function rasterize(heatmap) {
-    if (rasterCache.heatmap === heatmap && rasterCache.canvas) return rasterCache.canvas;
+  function rasterize(heatmap, sharedScale) {
+    if (
+      rasterCache.heatmap === heatmap
+      && rasterCache.scale === sharedScale
+      && rasterCache.canvas
+    ) return rasterCache.canvas;
     const grid = heatmap.grid;
     const rows = grid.length;
     const cols = grid[0].length;
-    const range = densityRange(grid);
+    const range = densityRange(grid, sharedScale);
     const span = range.max - range.min;
     const offscreen = document.createElement('canvas');
     offscreen.width = cols;
@@ -129,12 +145,12 @@
       }
     }
     context.putImageData(image, 0, 0);
-    rasterCache = { heatmap, canvas: offscreen };
+    rasterCache = { heatmap, scale: sharedScale, canvas: offscreen };
     return offscreen;
   }
 
-  function drawColorbar(context, width, height, grid) {
-    const range = densityRange(grid);
+  function drawColorbar(context, width, height, grid, sharedScale) {
+    const range = densityRange(grid, sharedScale);
     const barWidth = 12;
     const x = width - 28;
     const y = 22;
@@ -193,7 +209,7 @@
     const projectX = (value) => inset + ((value - extent.xmin) / spanX) * plotWidth;
     const projectY = (value) => inset + ((value - extent.ymin) / spanY) * plotHeight;
     context.imageSmoothingEnabled = true;
-    context.drawImage(rasterize(heatmap), inset, inset, plotWidth, plotHeight);
+    context.drawImage(rasterize(heatmap, model.heatmap_scale), inset, inset, plotWidth, plotHeight);
 
     const nodes = new Map((model.nodes || []).map((node) => [node.id, node]));
     const route = Array.isArray(model.route) ? model.route.slice() : [];
@@ -218,7 +234,7 @@
     });
 
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
-    drawColorbar(context, width, height, grid);
+    drawColorbar(context, width, height, grid, model.heatmap_scale);
   }
 
   return {
@@ -229,6 +245,8 @@
     description,
     heatmapHint,
     indexBySolution,
+    isValidScale,
+    densityRange,
     draw,
   };
 });

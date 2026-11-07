@@ -88,6 +88,8 @@ test('the summary table and the sensitivity note use the simulated metrics', () 
       ranking_inversion_cv: 0.2,
       frontier_loss_cv: null,
     },
+  }, {
+    sol_a: { co2_kg: 12.345, total_speed_emission_factor: 1.23456 },
   });
 
   assert.ok(report);
@@ -96,6 +98,8 @@ test('the summary table and the sensitivity note use the simulated metrics', () 
   assert.deepEqual(robustness.tableRows(report)[0], [
     'SOL-sol_a',
     '4',
+    '12,35',
+    '1,235',
     '10',
     '10,1',
     '0,08',
@@ -119,13 +123,20 @@ test('the metrics table filters by the solution name and sorts by a column', () 
       solution('sol_near', 4, 10, 0.071, 0.094),
     ],
     dominance: [[0, 0], [0, 0]],
+  }, {
+    sol_far: { co2_kg: 25, total_speed_emission_factor: 1.4 },
+    sol_near: { co2_kg: 20, total_speed_emission_factor: 1.2 },
   });
 
   const byDistance = robustness.viewSolutions(report, { sort: { column: 'distance', direction: 'asc' } });
   assert.deepEqual(byDistance.map((item) => item.name), ['SOL-sol_near', 'SOL-sol_far']);
   const byRegret = robustness.tableRows(report, { sort: { column: 'minmax', direction: 'asc' } });
   assert.equal(byRegret[0][0], 'SOL-sol_near');
-  assert.equal(byRegret[0][8], '7,1% · 9,4%');
+  assert.equal(byRegret[0][10], '7,1% · 9,4%');
+  const byEmissions = robustness.viewSolutions(report, {
+    sort: { column: 'co2Kg', direction: 'asc' },
+  });
+  assert.deepEqual(byEmissions.map((item) => item.name), ['SOL-sol_near', 'SOL-sol_far']);
   const filtered = robustness.tableRows(report, { query: 'sol_far' });
   assert.deepEqual(filtered.map((row) => row[0]), ['SOL-sol_far']);
 });

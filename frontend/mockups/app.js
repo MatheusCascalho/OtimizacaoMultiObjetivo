@@ -53,6 +53,8 @@ const state = {
   routeGraphKey: null,
   emissionsBySolution: {},
   emissionRunId: null,
+  emissionHeatmapScale: null,
+  emissionHeatmapScaleRunId: null,
   routeEmission: null,
   routeEmissionKey: null,
   routeViewMode: 'graph',
@@ -651,6 +653,8 @@ function clearReferencePoints() {
   state.hiddenRounds = new Set();
   state.emissionsBySolution = {};
   state.emissionRunId = null;
+  state.emissionHeatmapScale = null;
+  state.emissionHeatmapScaleRunId = null;
   state.routeEmission = null;
   state.routeEmissionKey = null;
   state.routeViewMode = 'graph';
@@ -859,6 +863,17 @@ async function startRun() {
   }
 }
 
+function hasEmissionsForSolutions(solutions, emissionsBySolution) {
+  return Array.isArray(solutions) && solutions.every((solution) => {
+    const emission = emissionsBySolution[solution.solution_id];
+    return emission
+      && emission.co2_kg != null
+      && Number.isFinite(Number(emission.co2_kg))
+      && emission.total_speed_emission_factor != null
+      && Number.isFinite(Number(emission.total_speed_emission_factor));
+  });
+}
+
 async function runRobustness() {
   const button = document.querySelector('#robustness-analysis');
   const panel = document.querySelector('#robustness-panel');
@@ -876,13 +891,41 @@ async function runRobustness() {
       method: 'POST',
       body: JSON.stringify({}),
     });
-    state.robustness = report;
-    if (!window.Robustness || !Robustness.show(report)) {
+    if (!window.Robustness || !report.run_id || !Robustness.mapReport(report)) {
       if (panel) {
         panel.hidden = false;
         panel.querySelector('#robustness-status').textContent = 'A resposta da análise de robustez não pôde ser lida.';
       }
       return;
+    }
+    state.robustness = report;
+    let emissionsBySolution = state.emissionsBySolution;
+    let emissionError = '';
+    const hasEmissions = hasEmissionsForSolutions(report.solutions, emissionsBySolution);
+    if (state.emissionRunId !== report.run_id || !hasEmissions) {
+      try {
+        const emissions = await fetchJson(`/runs/${report.run_id}/emissions`);
+        emissionsBySolution = EmissionHeatmap.indexBySolution(emissions);
+        state.emissionsBySolution = emissionsBySolution;
+        state.emissionRunId = report.run_id;
+        const isComplete = hasEmissionsForSolutions(report.solutions, emissionsBySolution);
+        if (!isComplete) emissionError = 'A resposta de emissões não contém dados para todas as soluções.';
+      } catch (error) {
+        emissionsBySolution = {};
+        state.emissionsBySolution = {};
+        state.emissionRunId = null;
+        emissionError = `Não foi possível obter as emissões de CO2: ${error.message}`;
+      }
+    }
+    if (!window.Robustness || !Robustness.show(report, emissionsBySolution)) {
+      if (panel) {
+        panel.hidden = false;
+        panel.querySelector('#robustness-status').textContent = 'A resposta da análise de robustez não pôde ser lida.';
+      }
+      return;
+    }
+    if (emissionError && panel) {
+      panel.querySelector('#robustness-status').textContent = `Análise concluída. ${emissionError}`;
     }
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     panel.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
@@ -1250,6 +1293,9 @@ function drawExpandedRoute() {
   ) {
     EmissionHeatmap.draw(canvas, {
       heatmap: state.routeEmission.heatmap,
+      heatmap_scale: state.emissionHeatmapScaleRunId === state.activeRun?.run_id
+        ? state.emissionHeatmapScale
+        : null,
       heatmap_message: state.routeEmission.heatmap_message,
       nodes: state.routeGraph.nodes,
       route: state.routeGraph.route,
@@ -1362,21 +1408,34 @@ async function toggleEmissionHeatmap() {
   }
   const key = currentRouteKey();
   if (!solution?.solutionId || !key || !state.activeRun?.run_id) return;
-  if (state.routeEmission && state.routeEmissionKey === key) {
-    if (state.routeEmission.heatmap) activateEmissionHeatmap();
-    else showEmissionError(state.routeEmission.heatmap_message || 'A densidade de CO2 não está disponível para esta solução.');
-    return;
-  }
+  const runId = state.activeRun.run_id;
   button.disabled = true;
   button.textContent = 'Calculando densidade...';
   try {
-    const payload = await fetchJson(`/runs/${state.activeRun.run_id}/solutions/${solution.solutionId}/emission`);
+    const payload = state.routeEmission && state.routeEmissionKey === key
+      ? state.routeEmission
+      : await fetchJson(`/runs/${runId}/solutions/${solution.solutionId}/emission`);
     if (currentRouteKey() !== key || !document.querySelector('#route-dialog').open) return;
     state.routeEmission = payload;
     state.routeEmissionKey = key;
     if (solution.solutionId) state.emissionsBySolution[solution.solutionId] = payload;
-    if (payload.heatmap) activateEmissionHeatmap();
-    else showEmissionError(payload.heatmap_message || 'A densidade de CO2 não está disponível para esta solução.');
+    if (!payload.heatmap) {
+      showEmissionError(payload.heatmap_message || 'A densidade de CO2 não está disponível para esta solução.');
+      return;
+    }
+    let scale = state.emissionHeatmapScaleRunId === runId
+      ? state.emissionHeatmapScale
+      : null;
+    if (!window.EmissionHeatmap.isValidScale(scale)) {
+      scale = await fetchJson(`/runs/${runId}/emissions/heatmap-scale`);
+      if (!window.EmissionHeatmap.isValidScale(scale)) {
+        throw new Error('A resposta da escala comum do heatmap é inválida.');
+      }
+      state.emissionHeatmapScale = scale;
+      state.emissionHeatmapScaleRunId = runId;
+    }
+    if (currentRouteKey() !== key || !document.querySelector('#route-dialog').open) return;
+    activateEmissionHeatmap();
   } catch (error) {
     if (currentRouteKey() === key) showEmissionError(error.message);
   } finally {

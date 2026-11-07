@@ -36,3 +36,18 @@ test('the solution index keeps the total speed factor', () => {
   assert.match(emission.description(indexed.sol_a), /1\.233/);
   assert.match(emission.heatmapHint(indexed.sol_a), /suavizada/);
 });
+
+test('all solution heatmaps can use one validated density range', () => {
+  const sharedScale = { min: 0.25, max: 8.5 };
+
+  assert.equal(emission.isValidScale(sharedScale), true);
+  assert.equal(emission.isValidScale({ min: 9, max: 8 }), false);
+  assert.deepEqual(
+    emission.densityRange([[1, 2], [3, 4]], sharedScale),
+    sharedScale,
+  );
+  assert.deepEqual(
+    emission.densityRange([[1, 2], [3, 4]], null),
+    { min: 1, max: 4 },
+  );
+});
