@@ -14,7 +14,7 @@
 
 O frontend usa somente HTML, CSS e JavaScript vanilla. Com a stack Compose ativa, a tela consome o catálogo, upload, instâncias, análise de matrizes/grafo, execução/polling/cancelamento, resultados, notificações e download de rota da API local.
 
-Os relatórios de robustez e multicritério são persistidos por execução e reapresentados ao abrir a última execução concluída da instância.
+Os relatórios de robustez e multicritério são persistidos por execução e reapresentados ao abrir a última execução concluída da instância. A seção de decisão AHP permite calibrar comparações entre distância, tempo, emissão de CO2 e Min-Max Regret, conferir a razão de consistência e consultar o ranking e as matrizes (com paginação para matrizes de alternativas maiores). O cálculo é realizado pela API Python em `POST /api/v1/runs/{run_id}/ahp`; blocos das matrizes de alternativas são obtidos por `POST /api/v1/runs/{run_id}/ahp/matrices`. Ambos usam somente métricas disponíveis no relatório real de robustez e não criam resultados ilustrativos.
 
 Sem API disponível, o dashboard mantém um conjunto ilustrativo, identificado como tal; não indica sucesso de criação ou execução. O solver real v1 é `RandomHeuristic` e produz uma aproximação por amostragem, não uma fronteira ótima garantida.
 

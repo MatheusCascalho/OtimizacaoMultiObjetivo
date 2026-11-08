@@ -18,6 +18,7 @@
     <script src="solution_compare.js" defer></script>
     <script src="robustness.js" defer></script>
     <script src="emission_heatmap.js" defer></script>
+    <script src="ahp.js" defer></script>
     <script src="app.js" defer></script>
   </head>
   <body>
@@ -45,6 +46,7 @@
         <nav class="primary-nav">
           <a class="nav-item" href="#inicio"><span class="nav-glyph" aria-hidden="true">◫</span>Visão geral</a>
           <a class="nav-item active" href="#instancias" aria-current="page"><span class="nav-glyph" aria-hidden="true">⌘</span>Instâncias<span class="nav-count" id="instance-count">0</span></a>
+          <a class="nav-item" href="#ahp-decision"><span class="nav-glyph" aria-hidden="true">⇧</span>Decisão AHP</a>
           <a class="nav-item" href="#modelos"><span class="nav-glyph" aria-hidden="true">◇</span>Modelos</a>
           <a class="nav-item" href="#documentacao"><span class="nav-glyph" aria-hidden="true">▤</span>Documentação</a>
         </nav>
@@ -272,6 +274,78 @@
                 </table>
               </article>
             </div>
+          </section>
+          <section class="workspace-section ahp-section" id="ahp-decision" aria-labelledby="ahp-title">
+            <p class="section-kicker">TOMADA DE DECISÃO · AHP</p>
+            <h2 id="ahp-title">Escolha da rota</h2>
+            <p class="ahp-intro">Calibre a importância relativa dos critérios. O ranking combina esses pesos com o desempenho das soluções da execução selecionada; valores menores são preferidos nos quatro critérios.</p>
+            <div class="ahp-hierarchy" aria-label="Hierarquia da decisão">
+              <div class="ahp-hierarchy-goal"><span class="metric-label">OBJETIVO</span><strong>Selecionar a melhor rota</strong></div>
+              <span class="ahp-hierarchy-connector" aria-hidden="true">↓</span>
+              <div class="ahp-criterion-list" aria-label="Critérios">
+                <span>Distância</span><span>Tempo</span><span>Emissão CO2</span><span>Min-Max Regret</span>
+              </div>
+              <span class="ahp-hierarchy-connector" aria-hidden="true">↓</span>
+              <div class="ahp-hierarchy-goal ahp-alternatives"><span class="metric-label">ALTERNATIVAS</span><strong>Rotas mapeadas na execução</strong></div>
+            </div>
+            <fieldset class="ahp-judgments">
+              <legend>Comparações entre critérios</legend>
+              <p class="ahp-helper">Use a escala de Saaty de 1 a 9. Valores acima de 1 favorecem o critério à esquerda; abaixo de 1 favorecem o critério à direita. O julgamento inverso é aplicado automaticamente.</p>
+              <div id="ahp-comparisons" class="ahp-comparisons"></div>
+              <div class="ahp-actions">
+                <button class="button button-primary" id="ahp-calculate" type="button" disabled>Calcular ranking</button>
+                <button class="button button-light" id="ahp-reset" type="button">Redefinir julgamentos</button>
+              </div>
+            </fieldset>
+            <p id="ahp-status" class="ahp-status" role="status" aria-live="polite"></p>
+            <div id="ahp-results" class="ahp-results" hidden>
+              <div class="ahp-result-heading">
+                <div><h3>Pesos dos critérios</h3><p id="ahp-consistency" class="ahp-consistency"></p></div>
+              </div>
+              <div class="quality-table-scroll">
+                <table id="ahp-weights" class="quality-table">
+                  <caption class="sr-only">Pesos calculados para os critérios AHP</caption>
+                  <thead><tr><th scope="col">Critério</th><th scope="col">Peso</th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <h3 class="ahp-ranking-title">Ranking global</h3>
+              <div class="quality-table-scroll">
+                <table id="ahp-ranking" class="quality-table ahp-ranking">
+                  <caption class="sr-only">Ranking de rotas pelo método AHP</caption>
+                  <thead><tr><th scope="col">Pos.</th><th scope="col">Solução</th><th scope="col">Distância</th><th scope="col">Tempo</th><th scope="col">CO2</th><th scope="col">Min-Max Regret</th><th scope="col">Pontuação global</th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <p class="ahp-method-note">Desempenhos numéricos são convertidos em uma escala de preferência de 1 a 9 (melhor = 9; pior = 1). A prioridade local é obtida pela normalização das colunas e média das linhas; a pontuação global é a soma ponderada pelos pesos dos critérios.</p>
+            </div>
+            <details id="ahp-matrices" class="ahp-matrices" hidden>
+              <summary>Visualizar matrizes do procedimento</summary>
+              <div class="ahp-matrix-section">
+                <h3>Matriz de comparação dos critérios</h3>
+                <div class="quality-table-scroll">
+                  <table id="ahp-criteria-matrix" class="quality-table ahp-matrix">
+                    <caption class="sr-only">Matriz recíproca de comparação entre os critérios</caption>
+                  </table>
+                </div>
+              </div>
+              <div class="ahp-matrix-section">
+                <h3>Matriz de comparação das alternativas</h3>
+                <p class="ahp-helper">Matrizes de rotas são exibidas em blocos de 12 × 12 para preservar a leitura em conjuntos maiores. Os controles permitem percorrer separadamente linhas e colunas.</p>
+                <label class="ahp-matrix-select" for="ahp-matrix-criterion">Critério<select id="ahp-matrix-criterion">
+                  <option value="distance">Distância</option><option value="nominalTime">Tempo</option><option value="co2Kg">Emissão de CO2</option><option value="minmax">Min-Max Regret</option>
+                </select></label>
+                <div class="ahp-matrix-paging">
+                  <div><button class="button button-light" id="ahp-matrix-row-prev" type="button">Linhas anteriores</button><span id="ahp-matrix-row-range"></span><button class="button button-light" id="ahp-matrix-row-next" type="button">Próximas linhas</button></div>
+                  <div><button class="button button-light" id="ahp-matrix-column-prev" type="button">Colunas anteriores</button><span id="ahp-matrix-column-range"></span><button class="button button-light" id="ahp-matrix-column-next" type="button">Próximas colunas</button></div>
+                </div>
+                <div class="quality-table-scroll">
+                  <table id="ahp-alternatives-matrix" class="quality-table ahp-matrix">
+                    <caption class="sr-only">Bloco da matriz recíproca de comparação das alternativas</caption>
+                  </table>
+                </div>
+              </div>
+            </details>
           </section>
           <section class="workspace-section" id="documentacao" aria-labelledby="documentation-title">
             <p class="section-kicker">REFERÊNCIA DO PROBLEMA</p>

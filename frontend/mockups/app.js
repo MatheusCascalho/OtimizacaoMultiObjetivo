@@ -299,6 +299,16 @@ function initializeLocalSettings() {
 function clearRobustness() {
   state.robustness = null;
   if (window.Robustness) Robustness.clear();
+  if (window.AHP) AHP.clear();
+}
+
+function updateAHP(report = state.robustness) {
+  if (!window.AHP || !window.Robustness || !report) {
+    if (window.AHP) AHP.clear();
+    return;
+  }
+  const mapped = Robustness.mapReport(report, state.emissionsBySolution);
+  AHP.setSolutions(mapped ? mapped.solutions : null);
 }
 
 function applyInstanceSummary(instance) {
@@ -784,6 +794,7 @@ async function loadStoredRobustness(runId) {
       throw new Error('A resposta da análise multicritério não pôde ser lida.');
     }
     state.robustness = report;
+    updateAHP(report);
   } catch (error) {
     const panel = document.querySelector('#robustness-panel');
     panel.hidden = false;
@@ -919,6 +930,7 @@ async function runRobustness() {
       }
       return;
     }
+    updateAHP(report);
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     panel.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
   } catch (error) {
@@ -1001,6 +1013,7 @@ async function openNotification(notification) {
     await loadNotifications();
   }
   if (notification.instance_id) {
+    clearRobustness();
     state.selectedInstanceId = notification.instance_id;
     state.instance = await fetchJson(`/instances/${notification.instance_id}`);
     state.instances = [state.instance, ...state.instances.filter((instance) => instance.instance_id !== notification.instance_id)];
@@ -1076,6 +1089,7 @@ async function createInstance(event) {
         },
       }),
     });
+    clearRobustness();
     state.instance = instance;
     state.selectedInstanceId = instance.instance_id;
     state.instances = [instance, ...state.instances.filter((item) => item.instance_id !== instance.instance_id)];
@@ -2809,6 +2823,29 @@ document.querySelector('#start-run').addEventListener('click', startRun);
 document.querySelector('#robustness-analysis').addEventListener('click', runRobustness);
 document.querySelector('#cancel-run').addEventListener('click', cancelRun);
 if (window.Robustness) Robustness.mount(document.querySelector('#robustness-panel'));
+if (window.AHP) {
+  AHP.mount(
+    document.querySelector('#ahp-decision'),
+    (judgments) => {
+      if (!state.activeRun?.run_id) throw new Error('Não há uma execução selecionada.');
+      return fetchJson(`/runs/${state.activeRun.run_id}/ahp`, {
+        method: 'POST',
+        body: JSON.stringify({ judgments }),
+      });
+    },
+    ({ criterion, rowOffset, columnOffset }) => {
+      if (!state.activeRun?.run_id) throw new Error('Não há uma execução selecionada.');
+      return fetchJson(`/runs/${state.activeRun.run_id}/ahp/matrices`, {
+        method: 'POST',
+        body: JSON.stringify({
+          criterion,
+          row_offset: rowOffset,
+          column_offset: columnOffset,
+        }),
+      });
+    },
+  );
+}
 document.querySelector('#toggle-compare-solution').addEventListener('click', () => {
   if (selectedId) toggleComparison(selectedId);
 });

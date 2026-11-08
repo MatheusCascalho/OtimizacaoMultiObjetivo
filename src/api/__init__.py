@@ -3,6 +3,7 @@ from urllib.parse import urlparse
 from flask import Flask, request
 from sqlalchemy.engine import Engine
 
+from api.routes.ahp import ahp_blueprint
 from api.routes.emission import emission_blueprint
 from api.routes.health import health_blueprint
 from api.routes.instances import instances_blueprint
@@ -59,6 +60,7 @@ def create_app(settings: Settings | None = None) -> Flask:
     app.register_blueprint(instances_blueprint)
     app.register_blueprint(runs_blueprint)
     app.register_blueprint(emission_blueprint)
+    app.register_blueprint(ahp_blueprint)
     app.register_blueprint(robustness_blueprint)
     app.register_blueprint(notifications_blueprint)
 
