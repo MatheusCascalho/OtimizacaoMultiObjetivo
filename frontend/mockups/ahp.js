@@ -195,18 +195,20 @@
       `λmax ${formatNumber(result.consistency.lambda_max, 4)} · IC ${formatNumber(result.consistency.consistency_index, 4)} · RC ${formatPercent(result.consistency.ratio)}`;
 
     const rankingBody = container.querySelector('#ahp-ranking tbody');
-    rankingBody.replaceChildren(...result.ranking.map((solution, index) => {
+    const rows = result.ranking.map((solution, index) => {
       const row = document.createElement('tr');
       if (index === 0) row.className = 'ahp-best';
-      appendCell(row, String(index + 1), 'th', { scope: 'row' });
-      appendCell(row, solution.name || solution.label || solution.solution_id || `Solução ${index + 1}`, 'th', {
+      appendCell(row, String(index + 1));
+      appendCell(row, solution.label || solution.name || solution.solution_id || `Solução ${index + 1}`, 'th', {
         scope: 'row',
         title: solution.solution_id ? String(solution.solution_id) : '',
       });
+      appendCell(row, solution.solution_id, 'td', { className: 'ahp-solution-id' });
       CRITERIA.forEach((criterion) => appendCell(row, formatPercent(solution.local?.[criterion.id])));
       appendCell(row, formatNumber(solution.score, 5), 'td', { className: 'ahp-score' });
-      rankingBody.append(row);
-    }));
+      return row;
+    });
+    rankingBody.replaceChildren(...rows);
     container.querySelector('#ahp-results').hidden = false;
     if (container.querySelector('#ahp-matrices').open) renderMatrices();
   }
