@@ -1,5 +1,6 @@
 """Reusable multiobjective analysis tools."""
 
+from multiobjective_algorithms.ahp import calculate_ahp, calculate_alternative_matrix
 from multiobjective_algorithms.dominance import non_dominated_mask
 from multiobjective_algorithms.hypervolume import (
     HypervolumeSummary,
@@ -64,6 +65,8 @@ __all__ = [
     "accumulated_prefix_sizes",
     "aggregate_quality_evolution",
     "analyze_robustness",
+    "calculate_ahp",
+    "calculate_alternative_matrix",
     "compute_reference_points",
     "configuration_key",
     "estimate_reference_points",

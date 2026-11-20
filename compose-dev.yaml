@@ -64,6 +64,7 @@ services:
       - ./frontend/mockups/index.html:/usr/share/nginx/html/index.html:ro
       - ./frontend/mockups/styles.css:/usr/share/nginx/html/styles.css:ro
       - ./frontend/mockups/app.js:/usr/share/nginx/html/app.js:ro
+      - ./frontend/mockups/ahp.js:/usr/share/nginx/html/ahp.js:ro
       - ./frontend/mockups/solution_compare.js:/usr/share/nginx/html/solution_compare.js:ro
       - ./frontend/mockups/robustness.js:/usr/share/nginx/html/robustness.js:ro
       - ./frontend/mockups/emission_heatmap.js:/usr/share/nginx/html/emission_heatmap.js:ro

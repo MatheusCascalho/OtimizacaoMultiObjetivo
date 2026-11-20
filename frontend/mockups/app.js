@@ -53,6 +53,8 @@ const state = {
   routeGraphKey: null,
   emissionsBySolution: {},
   emissionRunId: null,
+  emissionHeatmapScale: null,
+  emissionHeatmapScaleRunId: null,
   routeEmission: null,
   routeEmissionKey: null,
   routeViewMode: 'graph',
@@ -297,6 +299,16 @@ function initializeLocalSettings() {
 function clearRobustness() {
   state.robustness = null;
   if (window.Robustness) Robustness.clear();
+  if (window.AHP) AHP.clear();
+}
+
+function updateAHP(report = state.robustness) {
+  if (!window.AHP || !window.Robustness || !report) {
+    if (window.AHP) AHP.clear();
+    return;
+  }
+  const mapped = Robustness.mapReport(report, state.emissionsBySolution);
+  AHP.setSolutions(mapped ? mapped.solutions : null);
 }
 
 function applyInstanceSummary(instance) {
@@ -651,6 +663,8 @@ function clearReferencePoints() {
   state.hiddenRounds = new Set();
   state.emissionsBySolution = {};
   state.emissionRunId = null;
+  state.emissionHeatmapScale = null;
+  state.emissionHeatmapScaleRunId = null;
   state.routeEmission = null;
   state.routeEmissionKey = null;
   state.routeViewMode = 'graph';
@@ -763,9 +777,30 @@ async function loadRunResults(runId, offset) {
   applyInstanceSummary(state.instance);
   if (offset === 0 && state.selectedInstanceId) {
     await loadQualityEvolution(state.selectedInstanceId);
+    await loadStoredRobustness(runId);
   }
   if (state.solutions.length) selectSolution(selectedId);
   else renderTable();
+}
+
+async function loadStoredRobustness(runId) {
+  try {
+    const report = await fetchJson(`/runs/${runId}/robustness`);
+    if (!report) return;
+    if (report.run_id !== runId || report.instance_id !== state.selectedInstanceId) {
+      throw new Error('O relatório persistido não corresponde à execução selecionada.');
+    }
+    if (!window.Robustness || !Robustness.show(report, state.emissionsBySolution)) {
+      throw new Error('A resposta da análise multicritério não pôde ser lida.');
+    }
+    state.robustness = report;
+    updateAHP(report);
+  } catch (error) {
+    const panel = document.querySelector('#robustness-panel');
+    panel.hidden = false;
+    panel.querySelector('#robustness-status').textContent =
+      `Não foi possível recuperar a análise persistida: ${error.message}`;
+  }
 }
 
 async function pollRun(runId) {
@@ -876,14 +911,26 @@ async function runRobustness() {
       method: 'POST',
       body: JSON.stringify({}),
     });
-    state.robustness = report;
-    if (!window.Robustness || !Robustness.show(report)) {
+    if (!window.Robustness
+      || !report.run_id
+      || report.run_id !== state.activeRun?.run_id
+      || !Robustness.mapReport(report)) {
       if (panel) {
         panel.hidden = false;
-        panel.querySelector('#robustness-status').textContent = 'A resposta da análise de robustez não pôde ser lida.';
+        panel.querySelector('#robustness-status').textContent =
+          'A resposta da análise não corresponde à última execução selecionada.';
       }
       return;
     }
+    state.robustness = report;
+    if (!Robustness.show(report, state.emissionsBySolution)) {
+      if (panel) {
+        panel.hidden = false;
+        panel.querySelector('#robustness-status').textContent = 'A resposta da análise não pôde ser lida.';
+      }
+      return;
+    }
+    updateAHP(report);
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     panel.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
   } catch (error) {
@@ -966,6 +1013,7 @@ async function openNotification(notification) {
     await loadNotifications();
   }
   if (notification.instance_id) {
+    clearRobustness();
     state.selectedInstanceId = notification.instance_id;
     state.instance = await fetchJson(`/instances/${notification.instance_id}`);
     state.instances = [state.instance, ...state.instances.filter((instance) => instance.instance_id !== notification.instance_id)];
@@ -1041,6 +1089,7 @@ async function createInstance(event) {
         },
       }),
     });
+    clearRobustness();
     state.instance = instance;
     state.selectedInstanceId = instance.instance_id;
     state.instances = [instance, ...state.instances.filter((item) => item.instance_id !== instance.instance_id)];
@@ -1250,6 +1299,9 @@ function drawExpandedRoute() {
   ) {
     EmissionHeatmap.draw(canvas, {
       heatmap: state.routeEmission.heatmap,
+      heatmap_scale: state.emissionHeatmapScaleRunId === state.activeRun?.run_id
+        ? state.emissionHeatmapScale
+        : null,
       heatmap_message: state.routeEmission.heatmap_message,
       nodes: state.routeGraph.nodes,
       route: state.routeGraph.route,
@@ -1362,21 +1414,34 @@ async function toggleEmissionHeatmap() {
   }
   const key = currentRouteKey();
   if (!solution?.solutionId || !key || !state.activeRun?.run_id) return;
-  if (state.routeEmission && state.routeEmissionKey === key) {
-    if (state.routeEmission.heatmap) activateEmissionHeatmap();
-    else showEmissionError(state.routeEmission.heatmap_message || 'A densidade de CO2 não está disponível para esta solução.');
-    return;
-  }
+  const runId = state.activeRun.run_id;
   button.disabled = true;
   button.textContent = 'Calculando densidade...';
   try {
-    const payload = await fetchJson(`/runs/${state.activeRun.run_id}/solutions/${solution.solutionId}/emission`);
+    const payload = state.routeEmission && state.routeEmissionKey === key
+      ? state.routeEmission
+      : await fetchJson(`/runs/${runId}/solutions/${solution.solutionId}/emission`);
     if (currentRouteKey() !== key || !document.querySelector('#route-dialog').open) return;
     state.routeEmission = payload;
     state.routeEmissionKey = key;
     if (solution.solutionId) state.emissionsBySolution[solution.solutionId] = payload;
-    if (payload.heatmap) activateEmissionHeatmap();
-    else showEmissionError(payload.heatmap_message || 'A densidade de CO2 não está disponível para esta solução.');
+    if (!payload.heatmap) {
+      showEmissionError(payload.heatmap_message || 'A densidade de CO2 não está disponível para esta solução.');
+      return;
+    }
+    let scale = state.emissionHeatmapScaleRunId === runId
+      ? state.emissionHeatmapScale
+      : null;
+    if (!window.EmissionHeatmap.isValidScale(scale)) {
+      scale = await fetchJson(`/runs/${runId}/emissions/heatmap-scale`);
+      if (!window.EmissionHeatmap.isValidScale(scale)) {
+        throw new Error('A resposta da escala comum do heatmap é inválida.');
+      }
+      state.emissionHeatmapScale = scale;
+      state.emissionHeatmapScaleRunId = runId;
+    }
+    if (currentRouteKey() !== key || !document.querySelector('#route-dialog').open) return;
+    activateEmissionHeatmap();
   } catch (error) {
     if (currentRouteKey() === key) showEmissionError(error.message);
   } finally {
@@ -2758,6 +2823,29 @@ document.querySelector('#start-run').addEventListener('click', startRun);
 document.querySelector('#robustness-analysis').addEventListener('click', runRobustness);
 document.querySelector('#cancel-run').addEventListener('click', cancelRun);
 if (window.Robustness) Robustness.mount(document.querySelector('#robustness-panel'));
+if (window.AHP) {
+  AHP.mount(
+    document.querySelector('#ahp-decision'),
+    (judgments) => {
+      if (!state.activeRun?.run_id) throw new Error('Não há uma execução selecionada.');
+      return fetchJson(`/runs/${state.activeRun.run_id}/ahp`, {
+        method: 'POST',
+        body: JSON.stringify({ judgments }),
+      });
+    },
+    ({ criterion, rowOffset, columnOffset }) => {
+      if (!state.activeRun?.run_id) throw new Error('Não há uma execução selecionada.');
+      return fetchJson(`/runs/${state.activeRun.run_id}/ahp/matrices`, {
+        method: 'POST',
+        body: JSON.stringify({
+          criterion,
+          row_offset: rowOffset,
+          column_offset: columnOffset,
+        }),
+      });
+    },
+  );
+}
 document.querySelector('#toggle-compare-solution').addEventListener('click', () => {
   if (selectedId) toggleComparison(selectedId);
 });
