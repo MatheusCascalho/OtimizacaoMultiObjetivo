@@ -26,6 +26,24 @@ O código original do NeuroLKH é mantido como submódulo Git em `third_party/Ne
 
 A busca LKH é implementada em C. Em vez de reimplementá-la em Python, o projeto a encapsula por meio das bindings SWIG fornecidas junto ao NeuroLKH: uma camada Python prepara a instância e os dados da rede, chama o solver C e recebe a rota resultante. Assim, a integração preserva o algoritmo de busca nativo e oferece uma interface compatível com os demais solucionadores do projeto.
 
+```mermaid
+flowchart LR
+    app["Aplicação ParetoLab"]
+
+    subgraph third_party["Repositório terceiro: third_party/NeuroLKH"]
+        neurolkh["NeuroLKH<br/>(Python)"]
+        swig["Bindings SWIG"]
+        lkh["Solver LKH<br/>(código C)"]
+
+        neurolkh -->|"usa"| swig
+        swig -->|"encapsula"| lkh
+    end
+
+    app -->|"chama"| neurolkh
+```
+
+O NeuroLKH é mantido como repositório terceiro em `third_party/NeuroLKH` e chamado pela aplicação ParetoLab. Dentro desse repositório, as bindings SWIG conectam a implementação Python ao solver LKH em C.
+
 ### Rede pré-treinada
 
 O NeuroLKH usa uma Sparse Graph Network (SGN) treinada previamente, fora da execução de cada rota. Durante o treinamento, a rede aprende duas informações complementares: pontuações para as arestas, com supervisão baseada em soluções de referência, e penalidades para os nós, por meio de um objetivo não supervisionado relacionado ao grau dos nós em uma árvore 1-mínima. Os pesos resultantes são armazenados e carregados para inferência; a rede não é treinada novamente a cada execução analisada.
