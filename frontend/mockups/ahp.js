@@ -213,6 +213,33 @@
     if (container.querySelector('#ahp-matrices').open) renderMatrices();
   }
 
+  function setStoredResult(stored) {
+    if (!stored
+      || typeof stored !== 'object'
+      || !Array.isArray(stored.criteria_matrix)
+      || !stored.consistency
+      || !Array.isArray(stored.ranking)
+      || !stored.criteria_weights) {
+      return false;
+    }
+    comparisons = stored.judgments && typeof stored.judgments === 'object'
+      ? { ...stored.judgments }
+      : {};
+    renderComparisons();
+    result = {
+      criteria_matrix: stored.criteria_matrix,
+      criteria_weights: stored.criteria_weights,
+      consistency: stored.consistency,
+      ranking: stored.ranking,
+    };
+    matrixRowStart = 0;
+    matrixColumnStart = 0;
+    renderResults();
+    container.querySelector('#ahp-matrices').hidden = false;
+    setStatus(`Resultado AHP persistido recuperado. Razão de consistência (RC): ${formatPercent(result.consistency.ratio)}.`);
+    return true;
+  }
+
   function renderMatrices() {
     if (!result) return;
     renderCriteriaMatrix();
@@ -369,5 +396,6 @@
     mount,
     setSolutions,
     clear: () => setSolutions(null),
+    setStoredResult,
   };
 });

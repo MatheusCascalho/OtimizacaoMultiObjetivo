@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy.orm import Session
 
-from infrastructure.persistence.postgres.models import Run, RunRobustnessAnalysis
+from infrastructure.persistence.postgres.models import Run, RunAHPAnalysis, RunRobustnessAnalysis
 from multiobjective_algorithms import calculate_ahp, calculate_alternative_matrix
 
 
@@ -48,8 +50,53 @@ def rank_run_solutions(run_id: str):
             result = calculate_ahp(solutions, judgments)
         except ValueError as error:
             return _error("invalid_ahp", str(error), 422)
+        stored = session.get(RunAHPAnalysis, run_id)
+        if stored is None:
+            session.add(
+                RunAHPAnalysis(
+                    run_id=run_id,
+                    instance_id=run.instance_id,
+                    judgments=dict(judgments),
+                    criteria_matrix=result["criteria_matrix"],
+                    criteria_weights=result["criteria_weights"],
+                    consistency=result["consistency"],
+                    ranking=result["ranking"],
+                )
+            )
+        else:
+            stored.instance_id = run.instance_id
+            stored.judgments = dict(judgments)
+            stored.criteria_matrix = result["criteria_matrix"]
+            stored.criteria_weights = result["criteria_weights"]
+            stored.consistency = result["consistency"]
+            stored.ranking = result["ranking"]
+            stored.updated_at = datetime.now(UTC)
+        session.commit()
 
-    return jsonify({"run_id": run_id, **result}), 200
+    return jsonify({"run_id": run_id, "judgments": dict(judgments), **result}), 200
+
+
+@ahp_blueprint.get("/runs/<run_id>/ahp")
+def get_run_ahp(run_id: str):
+    engine = current_app.extensions["paretolab_database_engine"]
+    with Session(engine) as session:
+        run = session.get(Run, run_id)
+        if run is None:
+            return _error("run_not_found", "A execução solicitada não existe.", 404)
+        analysis = session.get(RunAHPAnalysis, run_id)
+        if analysis is None:
+            return "", 204
+        if analysis.instance_id != run.instance_id:
+            return _error("invalid_ahp_report", "O relatório AHP não corresponde à execução selecionada.", 409)
+        payload = {
+            "run_id": run_id,
+            "judgments": analysis.judgments,
+            "criteria_matrix": analysis.criteria_matrix,
+            "criteria_weights": analysis.criteria_weights,
+            "consistency": analysis.consistency,
+            "ranking": analysis.ranking,
+        }
+    return jsonify(payload), 200
 
 
 @ahp_blueprint.post("/runs/<run_id>/ahp/matrices")

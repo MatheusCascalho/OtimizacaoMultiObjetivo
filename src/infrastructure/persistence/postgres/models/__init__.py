@@ -2,6 +2,7 @@ from infrastructure.persistence.postgres.models.instance import Instance, Instan
 from infrastructure.persistence.postgres.models.layout import CityLayout
 from infrastructure.persistence.postgres.models.run import Run
 from infrastructure.persistence.postgres.models.robustness import RunRobustnessAnalysis
+from infrastructure.persistence.postgres.models.ahp import RunAHPAnalysis
 from infrastructure.persistence.postgres.models.solution import (
     Notification,
     RunAttemptSample,
@@ -16,6 +17,7 @@ __all__ = [
     "CityLayout",
     "Run",
     "RunRobustnessAnalysis",
+    "RunAHPAnalysis",
     "RunSolution",
     "RunAttemptSample",
     "Notification",
