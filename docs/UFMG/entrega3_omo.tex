@@ -10,14 +10,16 @@
 \title{Otimização Multiobjetivo e Decisão no Caixeiro Viajante Biobjetivo}
 
 \author{
-\authorblockN{Cláudio Márcio Campos Paixão, Filipe Carvalho de Andrade e Matheus Cascalho dos Santos}
-\authorblockA{Programa de Pós-Graduação em Engenharia Elétrica\\
+\IEEEauthorblockN{Cláudio Márcio Campos Paixão, Filipe Carvalho de Andrade e Matheus Cascalho dos Santos}
+\IEEEauthorblockA{Programa de Pós-Graduação em Engenharia Elétrica\\
 Universidade Federal de Minas Gerais, Belo Horizonte, Brasil\\
 EEE910A --- Otimização Multiobjetivo\\
 Professor: Lucas S. Batista}
 }
 
 \begin{document}
+\renewcommand{\abstractname}{Resumo}
+\renewcommand{\refname}{Referências}
 \maketitle
 
 \begin{abstract}
@@ -28,9 +30,9 @@ O NeuroLKH foi executado em cinco repetições de 50 avaliações, totalizando
 momentos por repetição pelos indicadores hipervolume e $\Delta$, com pontos de
 referência comuns estimados a partir da união das soluções. A frente global
 não dominada contém oito alternativas. O AHP, aplicado a distância, tempo
-nominal, emissão de CO$_2$ e Min-Max Regret, seleciona S6, com 18,5 h e
-1.266,3 km. A razão de consistência dos julgamentos é 12,25\%, acima do limite
-de referência de 10\%; por isso, a recomendação é provisória.
+nominal, emissão de CO$_2$ e máxima perda relativa, seleciona S6, com 18,5 h e
+1.266,3 km. A razão de consistência dos julgamentos é 7,17\%, abaixo do limite
+de referência de 10\%.
 \end{abstract}
 
 \section{Problema e instância}
@@ -59,7 +61,25 @@ $s_{ij}(w)=w\hat{t}_{ij}+(1-w)\hat{d}_{ij}$, variando o peso $w$ entre os
 extremos do intervalo $[0,1]$. O LKH procura uma rota para cada peso; as rotas
 são então avaliadas nas matrizes originais de tempo e distância.
 
-A execução da instância de exemplo ``TSP BIOBJETIVO'' registra 50 iterações
+A matriz escalarizada pode ser assimétrica porque os arcos $i\rightarrow j$
+e $j\rightarrow i$ podem ter custos diferentes. Para permitir que o modelo
+pré-treinado de rede em grafo, desenvolvido para instâncias euclidianas
+simétricas, seja utilizado, a implementação aplica a simetrização de
+Jonker--Volgenant antes da execução da rede e do LKH. Cada cidade $i$ é
+representada por um nó de saída $i_{\mathrm{out}}$ e um nó de entrada
+$i_{\mathrm{in}}$, de modo que se obtém uma instância simétrica com $2n$
+nós. Os arcos entre as duas partições preservam $s_{ij}(w)$, as arestas
+que acoplam corretamente $i_{\mathrm{out}}$ a $i_{\mathrm{in}}$ recebem uma
+penalidade negativa e as combinações proibidas recebem uma penalidade
+positiva. Essa construção transforma a orientação assimétrica em uma
+estrutura simétrica sem substituir os custos individuais por médias:
+$i_{\mathrm{out}}\rightarrow j_{\mathrm{in}}$ representa o arco original
+$i\rightarrow j$, enquanto $j_{\mathrm{out}}\rightarrow i_{\mathrm{in}}$
+representa $j\rightarrow i$. Ao final, o ciclo encontrado nos $2n$ nós é
+decodificado para as $n$ cidades e avaliado nas matrizes assimétricas
+originais de tempo e na matriz simétrica de distância.
+
+A execução da instância de exemplo ``TSP BIOBJETIVO'' registra 50 avaliações
 por repetição, cinco repetições e semente
 4180680559. Foram armazenadas 250 avaliações. Em cada repetição, a dominância
 foi recalculada sobre as rotas daquela repetição, sem usar o rótulo de
@@ -105,7 +125,7 @@ HV(A)=\operatorname{area}\left(\bigcup_{g\in A}[g,r]\right).
 Geometricamente, mede a área dominada pela frente no espaço de objetivos.
 Valores maiores indicam uma frente que cobre uma região maior, combinando
 proximidade e extensão; o valor depende da normalização e do ponto de
-referência \cite{zitzler}.
+referência \cite{zitzler99,zitzler00}.
 
 O indicador de espalhamento de Deb, $\Delta$, avalia a uniformidade do
 espaçamento e a cobertura dos extremos \cite{deb}. Ordenando a frente por
@@ -126,31 +146,31 @@ ponto.
 
 \subsection{Resultados}
 
-O hipervolume médio sobe de 0,259 no quinto candidato para 2,029 no
-quinquagésimo (desvio-padrão amostral final de 0,141), indicando aumento da
+O hipervolume médio sobe de 0,259 na quinta avaliação para 2,029 na
+quinquagésima (desvio-padrão amostral final de 0,141), indicando aumento da
 área coberta pela frente à medida que mais avaliações são incorporadas. O
 espalhamento médio passa de 0,895 para
 0,577; a trajetória não é monotônica, pois a inclusão de um novo ponto pode
 alterar o espaçamento entre vizinhos. As curvas médias e a variação entre as
 repetições são apresentadas nas Figs.~\ref{fig:hv} e \ref{fig:delta}.
 
-\begin{figure}[t]
+\begin{figure*}[t]
 \centering
-\includegraphics[width=\columnwidth]{figuras_entrega3/hipervolume.pdf}
+\includegraphics[width=0.88\textwidth]{figuras_entrega3/hipervolume.pdf}
 \caption{Evolução do hipervolume em dez momentos. A linha destaca a média das cinco repetições.}
 \label{fig:hv}
-\end{figure}
+\end{figure*}
 
-\begin{figure}[t]
+\begin{figure*}[t]
 \centering
-\includegraphics[width=\columnwidth]{figuras_entrega3/delta.pdf}
+\includegraphics[width=0.88\textwidth]{figuras_entrega3/delta.pdf}
 \caption{Evolução de $\Delta$ em dez momentos. Valores menores indicam melhor espalhamento.}
 \label{fig:delta}
-\end{figure}
+\end{figure*}
 
 \begin{table}[t]
 \centering
-\caption{Indicadores no 50\textsuperscript{o} candidato de cada repetição.}
+\caption{Indicadores na 50\textsuperscript{a} avaliação de cada repetição.}
 \label{tab:indicadores}
 \small
 \begin{tabular}{crrr}
@@ -189,43 +209,55 @@ $q$ vale 1,50 para velocidade inferior a 20 km/h, 1,15 de 20 a menos de
 estimativa determinística, baseada nas matrizes da instância e no fator-base
 assumido de 0,30 kg/km.
 
-O Min-Max Regret mede a maior perda relativa da alternativa entre distância
-e desempenho de tempo sob cenários simulados. O regret de distância é
-$(d-d_{\min})/d_{\min}$; o regret temporal médio compara o tempo realizado
-em cada cenário ao melhor tempo do conjunto e o normaliza pelo menor tempo
-médio. A pontuação é o máximo entre esses dois regrets, portanto valores
-menores são preferíveis. A análise usa 5.000 cenários Monte Carlo, semente
-42, coeficiente de variação de 20\% nos tempos dos arcos e correlação
-regional intra-arco de 30\%. Esses atributos não foram objetivos do
-NeuroLKH; avaliam impacto ambiental e desempenho relativo sob incerteza.
+O critério de máxima perda relativa (MPR) agrega o regret relativo de distância
+e o regret temporal médio relativo. Para uma alternativa $a$, sejam
+$r_d(a)=(d_a-d_{\min})/d_{\min}$ e
+$r_t(a)=\bar{R}_t(a)/\bar{T}_{\min}$, em que
+$\bar{R}_t(a)=S^{-1}\sum_{s=1}^{S}[T(a,s)-\min_b T(b,s)]$ é a média, nos
+$S$ cenários, do regret de tempo em cada cenário, e
+$\bar{T}_{\min}=\min_b\bar{T}(b)$ é o menor tempo médio, com $\bar{T}(b)$
+denotando o tempo médio da alternativa $b$. Então,
+$\mathrm{MPR}(a)=\max\{r_d(a),r_t(a)\}$; valores menores são preferíveis.
+Assim, toma-se o máximo entre os dois critérios, não o máximo do regret entre
+cenários: trata-se de uma agregação de Tchebycheff, não do minimax regret
+clássico. A análise usa 5.000 cenários Monte Carlo, semente 42, coeficiente de
+variação de 20\% nos tempos dos arcos e correlação regional intra-arco de 30\%.
+Esses atributos não foram objetivos do NeuroLKH; avaliam impacto ambiental e
+desempenho relativo sob incerteza.
 
 \begin{table*}[t]
 \centering
 \caption{Alternativas não dominadas e ranking AHP. S6, em negrito, é a alternativa selecionada.}
 \label{tab:alternativas}
 \small
-\begin{tabular}{crrrrrr}
+\begin{tabular}{crrrrrrr}
 \toprule
-Rank & Solução & Distância (km) & Tempo (h) & CO$_2$ (kg) & Min-Max Regret & AHP (\%)\\
+Rank & Solução & Distância (km) & Tempo (h) & CO$_2$ (kg) & MPR & P(frente) (\%) & AHP (\%)\\
 \midrule
-1 & \textbf{S6} & \textbf{1.266,3} & \textbf{18,5} & 414,392 & 0,0514 & \textbf{17,284}\\
-2 & S5 & 1.259,1 & 18,7 & 411,222 & 0,0479 & 17,193\\
-3 & S7 & 1.377,2 & 18,1 & 456,573 & 0,1435 & 12,775\\
-4 & S4 & 1.258,1 & 20,0 & 410,111 & 0,1204 & 12,700\\
-5 & S8 & 1.412,2 & 17,9 & 469,668 & 0,1725 & 11,506\\
-6 & S2 & 1.233,8 & 20,7 & 402,591 & 0,1597 & 10,741\\
-7 & S3 & 1.257,1 & 20,6 & 412,299 & 0,1541 & 10,480\\
-8 & S1 & 1.204,4 & 21,9 & 390,095 & 0,2267 & 7,320\\
+1 & \textbf{S6} & \textbf{1.266,3} & \textbf{18,5} & 414,392 & 0,0514 & 73,88 & \textbf{16,952}\\
+2 & S5 & 1.259,1 & 18,7 & 411,222 & 0,0479 & 100,00 & 16,650\\
+3 & S7 & 1.377,2 & 18,1 & 456,573 & 0,1435 & 85,10 & 14,238\\
+4 & S8 & 1.412,2 & 17,9 & 469,668 & 0,1725 & 71,52 & 13,584\\
+5 & S4 & 1.258,1 & 20,0 & 410,111 & 0,1204 & 95,36 & 12,115\\
+6 & S2 & 1.233,8 & 20,7 & 402,591 & 0,1597 & 99,82 & 10,066\\
+7 & S3 & 1.257,1 & 20,6 & 412,299 & 0,1541 & 60,06 & 9,905\\
+8 & S1 & 1.204,4 & 21,9 & 390,095 & 0,2267 & 100,00 & 6,490\\
 \bottomrule
 \end{tabular}
 \end{table*}
+
+As probabilidades de pertencer à fronteira nos cenários simulados são
+apresentadas para todas as alternativas na Tabela~\ref{tab:alternativas}.
+S6 tem 73,88\%, abaixo de S1 e S5 (100\%) e de S2 (99,82\%); portanto, esse
+indicador isolado não sustenta a escolha de S6. Ele complementa o ranking AHP,
+que considera os quatro critérios ponderados.
 
 \subsection{AHP e escolha}
 
 O AHP foi aplicado em duas etapas \cite{saaty}. Os julgamentos par a par
 dos critérios usam a escala de Saaty: distância/tempo $=1/9$,
-distância/CO$_2=1/3$, distância/Min-Max $=1/5$, tempo/CO$_2=3$,
-tempo/Min-Max $=1$ e CO$_2$/Min-Max $=2$; comparações não informadas são
+distância/CO$_2=1/3$, distância/MPR $=1/5$, tempo/CO$_2=3$,
+tempo/MPR $=6$ e CO$_2$/MPR $=2$; comparações não informadas são
 neutras. Os pesos locais das alternativas são obtidos a partir de avaliações
 monotônicas de desempenho em escala de 1 a 9, e a pontuação global é a soma
 ponderada desses pesos locais.
@@ -239,33 +271,31 @@ ponderada desses pesos locais.
 \toprule
 Critério & Peso\\
 \midrule
-Tempo nominal & 44,20\%\\
-Min-Max Regret & 25,71\%\\
-Emissão de CO$_2$ & 24,65\%\\
-Distância & 5,44\%\\
+Tempo nominal & 59,84\%\\
+Máxima perda relativa & 14,83\%\\
+Emissão de CO$_2$ & 19,95\%\\
+Distância & 5,38\%\\
 \midrule
-$\lambda_{\max}$ & 4,3308\\
-Índice de consistência & 0,1103\\
-Razão de consistência & 12,25\%\\
+$\lambda_{\max}$ & 4,1936\\
+Índice de consistência & 0,0645\\
+Razão de consistência & 7,17\%\\
 \bottomrule
 \end{tabular}
 \end{table}
 
-S6 obtém 17,284\%, apenas 0,091 ponto percentual acima de S5. A preferência
+S6 obtém 16,952\%, 0,302 ponto percentual acima de S5. A preferência
 forte pelo tempo nominal favorece S6 (18,5 h contra 18,7 h), embora S5 tenha
-menor distância, menor emissão e menor Min-Max Regret. S1 ilustra outro
-extremo: tem a menor distância e emissão, mas o maior tempo e regret; S8 tem
+menor distância, menor emissão e menor MPR. S1 ilustra outro
+extremo: tem a menor distância e emissão, mas o maior tempo e MPR; S8 tem
 o menor tempo, mas maior distância e emissão. Esses compromissos explicam a
 necessidade de ponderar os atributos, em vez de escolher pelo melhor valor
 isolado.
 
-A razão de consistência, 12,25\%, supera o limite de referência de 10\%.
-Assim, o ranking é uma recomendação provisória: os julgamentos par a par
-devem ser revistos, em especial porque a diferença entre S6 e S5 é pequena.
-A probabilidade estimada de S6 pertencer à fronteira sob incerteza é 73,88\%;
-seu tempo simulado médio é 18,5035 h e o CVaR$_{95}$ é 20,1620 h. Esses
-resultados complementam a decisão, mas não eliminam a necessidade de rever
-a consistência do AHP.
+A razão de consistência, 7,17\%, está abaixo do limite de referência de 10\%,
+indicando consistência aceitável nos julgamentos par a par. A diferença entre
+S6 e S5, contudo, permanece pequena. O tempo simulado médio de S6 é
+18,5035 h e o CVaR$_{95}$ é 20,1620 h; esses resultados complementam a decisão
+sob incerteza.
 
 \begin{figure*}[t]
 \centering
@@ -288,8 +318,9 @@ não dominadas. A evolução média do hipervolume indica maior área coberta co
 mais avaliações, enquanto $\Delta$ apresenta melhora média com variação entre
 execuções. O AHP seleciona S6 pelo compromisso entre tempo nominal e os
 atributos adicionais, mas sua vantagem sobre S5 é estreita. Como a razão de
-consistência excede 10\%, a escolha deve ser considerada provisória até que
-os julgamentos do decisor sejam revisados.
+consistência é de 7,17\%, abaixo do limite de referência de 10\%, os
+julgamentos apresentam consistência aceitável. A proximidade entre S6 e S5
+continua relevante na interpretação da recomendação.
 
 \begin{thebibliography}{00}
 \bibitem{modelagem}
@@ -308,10 +339,15 @@ K. Deb, A. Pratap, S. Agarwal e T. Meyarivan, ``A fast and elitist
 multiobjective genetic algorithm: NSGA-II,'' \emph{IEEE Transactions on
 Evolutionary Computation}, vol. 6, no. 2, pp. 182--197, 2002.
 
-\bibitem{zitzler}
-E. Zitzler, M. Laumanns e L. Thiele, ``Comparison of multiobjective
+\bibitem{zitzler00}
+E. Zitzler, K. Deb e L. Thiele, ``Comparison of multiobjective
 evolutionary algorithms: Empirical results,'' \emph{Evolutionary
 Computation}, vol. 8, no. 2, pp. 173--195, 2000.
+
+\bibitem{zitzler99}
+E. Zitzler e L. Thiele, ``Multiobjective evolutionary algorithms: A
+comparative case study and the strength Pareto approach,'' \emph{IEEE
+Transactions on Evolutionary Computation}, vol. 3, no. 4, pp. 257--271, 1999.
 
 \bibitem{saaty}
 T. L. Saaty, \emph{The Analytic Hierarchy Process}. New York, NY, USA:
