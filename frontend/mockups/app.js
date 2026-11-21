@@ -795,11 +795,29 @@ async function loadStoredRobustness(runId) {
     }
     state.robustness = report;
     updateAHP(report);
+    await loadStoredAHP(runId);
   } catch (error) {
     const panel = document.querySelector('#robustness-panel');
     panel.hidden = false;
     panel.querySelector('#robustness-status').textContent =
       `Não foi possível recuperar a análise persistida: ${error.message}`;
+  }
+}
+
+async function loadStoredAHP(runId) {
+  try {
+    const report = await fetchJson(`/runs/${runId}/ahp`);
+    if (!report) return;
+    if (report.run_id !== runId) {
+      throw new Error('O relatório AHP persistido não corresponde à execução selecionada.');
+    }
+    if (!window.AHP || !AHP.setStoredResult(report)) {
+      throw new Error('A resposta da decisão AHP persistida não pôde ser lida.');
+    }
+  } catch (error) {
+    const panel = document.querySelector('#ahp-decision');
+    if (panel) panel.querySelector('#ahp-status').textContent =
+      `Não foi possível recuperar o resultado AHP persistido: ${error.message}`;
   }
 }
 

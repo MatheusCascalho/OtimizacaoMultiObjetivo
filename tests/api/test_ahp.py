@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from api import create_app
 from api.settings import Settings
 from infrastructure.persistence.postgres.base import Base
-from infrastructure.persistence.postgres.models import Instance, Run, RunRobustnessAnalysis
+from infrastructure.persistence.postgres.models import Instance, Run, RunAHPAnalysis, RunRobustnessAnalysis
 
 
 @pytest.fixture
@@ -112,6 +112,28 @@ def test_ahp_endpoint_returns_python_ranking_and_consistency(app: Flask) -> None
     assert [item["solution_id"] for item in response.json["ranking"]] == ["route-b", "route-a"]
     assert response.json["criteria_matrix"][0][1] == pytest.approx(3)
     assert response.json["consistency"]["ratio"] > 0
+
+    with Session(app.extensions["paretolab_database_engine"]) as session:
+        stored = session.get(RunAHPAnalysis, "run_ahp")
+        assert stored is not None
+        assert stored.instance_id == "inst_ahp"
+        assert stored.judgments["distance:nominalTime"] == 3
+        assert len(stored.criteria_matrix) == 4
+        assert set(stored.criteria_weights) == {
+            "distance",
+            "nominalTime",
+            "co2Kg",
+            "minmax",
+        }
+        assert stored.consistency["ratio"] >= 0
+        assert [item["solution_id"] for item in stored.ranking] == ["route-b", "route-a"]
+
+    recovered = app.test_client().get("/api/v1/runs/run_ahp/ahp")
+    assert recovered.status_code == 200
+    assert recovered.json["judgments"] == response.json["judgments"]
+    assert recovered.json["criteria_weights"] == response.json["criteria_weights"]
+    assert recovered.json["consistency"] == response.json["consistency"]
+    assert recovered.json["ranking"] == response.json["ranking"]
 
 
 def test_ahp_matrix_endpoint_returns_requested_alternative_block(app: Flask) -> None:
