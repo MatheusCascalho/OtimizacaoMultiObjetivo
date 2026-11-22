@@ -26,13 +26,13 @@ Professor: Lucas S. Batista}
 Este trabalho apresenta a terceira entrega do estudo do caixeiro viajante
 biobjetivo com 250 cidades, cujos objetivos são minimizar tempo e distância.
 O NeuroLKH foi executado em cinco repetições de 50 avaliações, totalizando
-250 rotas. As cinco fronteiras aproximadas são comparadas e avaliadas em dez
-momentos por repetição pelos indicadores hipervolume e $\Delta$, com pontos de
-referência comuns estimados a partir da união das soluções. A frente global
-não dominada contém oito alternativas. O AHP, aplicado a distância, tempo
-nominal, emissão de CO$_2$ e máxima perda relativa, seleciona S6, com 18,5 h e
-1.266,3 km. A razão de consistência dos julgamentos é 7,17\%, abaixo do limite
-de referência de 10\%.
+250 rotas. As frentes por repetição são avaliadas em dez prefixos pelos
+indicadores hipervolume e $\Delta$, recalculados na mesma escala observada.
+A frente global contém oito soluções. O AHP exploratório atribui a maior
+pontuação a S6 (18,5 h; 1.266,3 km), mas a análise de sensibilidade e a
+remoção de critérios redundantes mostram que essa escolha depende das
+preferências e dos critérios incluídos; não se sustenta uma recomendação
+definitiva.
 \end{abstract}
 
 \section{Problema e instância}
@@ -58,8 +58,11 @@ seleção de arestas candidatas, com a busca local Lin--Kernighan--Helsgaun
 (LKH) \cite{neurolkh}. Para explorar os dois objetivos, cada avaliação usa
 uma escalarização dos custos normalizados,
 $s_{ij}(w)=w\hat{t}_{ij}+(1-w)\hat{d}_{ij}$, variando o peso $w$ entre os
-extremos do intervalo $[0,1]$. O LKH procura uma rota para cada peso; as rotas
-são então avaliadas nas matrizes originais de tempo e distância.
+extremos do intervalo $[0,1]$. Em cada repetição, os 50 pesos seguem a grade
+determinística $w_j=(j-1)/49$, $j=1,\ldots,50$, em ordem crescente; portanto,
+o espaçamento é $1/49$ e a mesma sequência é repetida nas cinco repetições.
+O LKH procura uma rota para cada peso; as rotas são então avaliadas nas
+matrizes originais de tempo e distância.
 
 A matriz escalarizada pode ser assimétrica porque os arcos $i\rightarrow j$
 e $j\rightarrow i$ podem ter custos diferentes. Para permitir que o modelo
@@ -80,8 +83,22 @@ decodificado para as $n$ cidades e avaliado nas matrizes assimétricas
 originais de tempo e na matriz simétrica de distância.
 
 A execução da instância de exemplo ``TSP BIOBJETIVO'' registra 50 avaliações
-por repetição, cinco repetições e semente
-4180680559. Foram armazenadas 250 avaliações. Em cada repetição, a dominância
+por repetição, cinco repetições e semente-base 4180680559. O worker deriva
+uma semente por repetição como
+$s_r=(4180680559+(r-1)\cdot1.000.003)\bmod 2^{31}$, resultando em
+2.033.196.911, 2.034.196.914, 2.035.196.917, 2.036.196.920 e
+2.037.196.923. Assim, as repetições diferem pela semente, não pelo
+cronograma de pesos. Cada chamada usa o padrão de 1.000 tentativas do LKH
+(``MaxTrials=1000'') em uma execução (``Runs=1''). Os custos escalares são
+normalizados por matriz, simetrizados por Jonker--Volgenant e convertidos em
+inteiros para o LKH: subtrai-se o menor custo fora da diagonal, aplica-se
+$\alpha=(20.000.000-2)/\max_{i\ne j}(c_{ij}-c_{\min})$ (ou $\alpha=1$ se a
+amplitude for nula) e arredonda-se $\alpha(c_{ij}-c_{\min})$, com correções
+para preservar as arestas de acoplamento. O fator $\alpha$ varia com o peso;
+os pesos inteiros são limitados a 20.000.000 e o LKH usa precisão interna
+100. A curva HV$\times k$ também reflete a ordem fixa de exploração dos pesos:
+ela descreve o preenchimento do sweep e não isola convergência do algoritmo.
+Foram armazenadas 250 avaliações. Em cada repetição, a dominância
 foi recalculada sobre as rotas daquela repetição, sem usar o rótulo de
 dominância persistido para outra análise. As fronteiras resultantes contêm,
 respectivamente, 3, 5, 4, 7 e 7 pontos. A união das cinco fronteiras, após
@@ -99,21 +116,24 @@ Fig.~\ref{fig:repeticoes} sobrepõe as cinco fronteiras.
 
 \subsection{Referência comum e cálculo}
 
-Como a fronteira Pareto ótima é desconhecida, os pontos de referência foram
-estimados pela união das soluções não dominadas das cinco repetições. A
-aproximação do ponto utópico é
-$z^I=(17{,}9\ \mathrm{h},\,1.204{,}4\ \mathrm{km})$ e a do ponto
-antiutópico (nadir) é
-$z^N=(21{,}9\ \mathrm{h},\,1.412{,}2\ \mathrm{km})$. Cada objetivo foi
-normalizado por
+Como a fronteira Pareto ótima é desconhecida, os limites comuns de normalização
+foram estimados pela união das frentes não dominadas dos prefixos nas cinco
+repetições. O ideal observado é
+$z^I=(17{,}9\ \mathrm{h},\,1.204{,}4\ \mathrm{km})$ e o pior valor observado
+nessas frentes é $z^{\mathrm{obs}}=(25{,}6\ \mathrm{h},\,1.494{,}8\ \mathrm{km})$.
+Esse último vetor é um limite amostral para as frentes comparadas, não o nadir
+Pareto verdadeiro. Cada objetivo foi normalizado por
 \begin{equation}
-g_k(x)=\frac{f_k(x)-z^I_k}{z^N_k-z^I_k},\quad k\in\{t,d\}.
+g_k(x)=\frac{f_k(x)-z^I_k}{z^{\mathrm{obs}}_k-z^I_k},\quad k\in\{t,d\}.
 \end{equation}
-Assim, o ponto de referência do hipervolume é $r=1{,}1z^N
-=(24{,}09\ \mathrm{h},\,1.553{,}42\ \mathrm{km})$ nas unidades originais,
-equivalente a $(1{,}5475,1{,}6796)$ no espaço normalizado. O valor reportado
-é adimensional. O mesmo intervalo e o mesmo ponto de referência foram usados
-nas cinco repetições e em todos os prefixos avaliados.
+O ponto de referência do hipervolume é $r=(1{,}1,1{,}1)$ no espaço
+normalizado, equivalente a $(26{,}37\ \mathrm{h},\,1.523{,}84\ \mathrm{km})$
+nas unidades originais. A margem de 10\% é, assim, aplicada à amplitude
+observada, e não ao valor absoluto dos objetivos. Esse ponto é pior que todos
+os pontos das frentes dos prefixos e foi mantido fixo em todas as repetições.
+Os pontos da Fig.~\ref{fig:repeticoes} com 24,3 h e 25,3 h ficam dentro do
+limite observado de 25,6 h e da caixa de referência de 26,37 h; não são
+extrapolados nem excluídos do HV por estarem fora da caixa.
 
 Para cada repetição, os indicadores foram calculados sobre a frente não
 dominada do prefixo de $k=5,10,\ldots,50$ avaliações. O hipervolume
@@ -131,7 +151,11 @@ O indicador de espalhamento de Deb, $\Delta$, avalia a uniformidade do
 espaçamento e a cobertura dos extremos \cite{deb}. Ordenando a frente por
 tempo, sejam $d_i$ as distâncias euclidianas entre pontos consecutivos,
 $\bar d$ sua média e $d^e_1,d^e_2$ as distâncias dos extremos observados aos
-extremos de referência aproximados:
+extremos de referência aproximados. Como no HV, as distâncias são calculadas
+após a normalização por $z^I$ e $z^{\mathrm{obs}}$ definida acima. Os
+extremos usados em $d^e_1,d^e_2$ são os pontos de menor tempo e de menor
+distância da união global final de oito soluções, fixos para todos os
+prefixos:
 \begin{equation}
 \Delta =
 \frac{d^e_1+d^e_2+\sum_{i=1}^{|A|-1}|d_i-\bar d|}
@@ -140,60 +164,78 @@ extremos de referência aproximados:
 Quanto menor $\Delta$, mais uniforme é o espaçamento e melhor a cobertura
 dos extremos; zero representa espaçamento uniforme com cobertura perfeita.
 Como não se conhece a frente exata, os extremos da união final servem de
-aproximação comum. Ambos os indicadores foram recalculados nos dez prefixos
-de cada repetição; as figuras mostram as cinco séries e sua média ponto a
-ponto.
+A escala anterior usava $z^N=(21{,}9\ \mathrm{h},1.412{,}2\ \mathrm{km})$:
+os pontos de 24,3 h e 25,3 h excediam esse limite em tempo e eram extrapolados
+na normalização. Com $z^{\mathrm{obs}}$, ambos ficam no intervalo observado.
+A normalização e os extremos de $\Delta$ continuam estimados da própria
+amostra, não de uma frente independente. Dos 50 prefixos, 3 contêm o extremo
+de menor tempo, 9 contêm o de menor distância e 3 contêm ambos; portanto, 9
+prefixos têm pelo menos uma distância extrema $d^e$ igual a zero. Nesses 9
+prefixos a média de $\Delta$ é 0,612, contra 0,725 nos outros 41; essa
+diferença descritiva não é uma estimativa causal, pois os prefixos também
+diferem em composição. Os indicadores permanecem descritivos, sujeitos a viés
+de amostra, e não são validação independente.
+
+Com as 250 avaliações ordenadas por repetição e tentativa, $\Delta$ foi
+recalculado nos dez prefixos usando a escala comum acima. Sua média final é
+0,576; os valores por repetição são 0,337, 0,794, 0,523, 0,560 e 0,668.
+As curvas mostram as cinco séries e a média ponto a ponto.
 
 \subsection{Resultados}
 
-O hipervolume médio sobe de 0,259 na quinta avaliação para 2,029 na
-quinquagésima (desvio-padrão amostral final de 0,141), indicando aumento da
-área coberta pela frente à medida que mais avaliações são incorporadas. O
-espalhamento médio passa de 0,895 para
-0,577; a trajetória não é monotônica, pois a inclusão de um novo ponto pode
-alterar o espaçamento entre vizinhos. As curvas médias e a variação entre as
-repetições são apresentadas nas Figs.~\ref{fig:hv} e \ref{fig:delta}.
+O hipervolume médio sobe de 0,356 na quinta avaliação para 0,976 na
+quinquagésima (desvio-padrão amostral final de 0,059), indicando aumento da
+área coberta pela frente à medida que mais avaliações são incorporadas. Na
+mesma escala recalibrada, $\Delta$ médio é 0,888 no primeiro prefixo e 0,576
+no último, com máximo intermediário de 0,943 em dez avaliações. A trajetória
+não é monotônica, pois novos pontos alteram o espaçamento e a cobertura dos
+extremos. As curvas médias e a variação entre as repetições são apresentadas
+na Fig.~\ref{fig:hv}.
 
 \begin{figure*}[t]
 \centering
-\includegraphics[width=0.88\textwidth]{figuras_entrega3/hipervolume.pdf}
-\caption{Evolução do hipervolume em dez momentos. A linha destaca a média das cinco repetições.}
+\begin{minipage}{0.48\textwidth}
+\centering
+\includegraphics[width=\linewidth]{figuras_entrega3/hipervolume.pdf}
+\end{minipage}\hfill
+\begin{minipage}{0.48\textwidth}
+\centering
+\includegraphics[width=\linewidth]{figuras_entrega3/delta.pdf}
+\end{minipage}
+\caption{Evolução em dez momentos do hipervolume (esquerda) e de $\Delta$ (direita). As linhas destacam as médias das cinco repetições.}
 \label{fig:hv}
-\end{figure*}
-
-\begin{figure*}[t]
-\centering
-\includegraphics[width=0.88\textwidth]{figuras_entrega3/delta.pdf}
-\caption{Evolução de $\Delta$ em dez momentos. Valores menores indicam melhor espalhamento.}
 \label{fig:delta}
 \end{figure*}
 
-\begin{table}[t]
+\begin{table*}[t]
 \centering
-\caption{Indicadores na 50\textsuperscript{a} avaliação de cada repetição.}
+\caption{Indicadores recalculados na 50\textsuperscript{a} avaliação de cada repetição.}
 \label{tab:indicadores}
 \small
 \begin{tabular}{crrr}
 \toprule
 Repetição & $|A|$ & $\Delta$ & $HV$\\
 \midrule
-1 & 3 & 0,290 & 2,091\\
-2 & 5 & 0,792 & 2,077\\
-3 & 4 & 0,528 & 2,202\\
-4 & 7 & 0,537 & 1,850\\
-5 & 7 & 0,738 & 1,924\\
+1 & 3 & 0,337 & 0,985\\
+2 & 5 & 0,794 & 0,989\\
+3 & 4 & 0,523 & 1,062\\
+4 & 7 & 0,560 & 0,911\\
+5 & 7 & 0,668 & 0,933\\
 \midrule
-Média & --- & 0,577 & 2,029\\
+Média & --- & 0,576 & 0,976\\
 \bottomrule
 \end{tabular}
-\end{table}
+\end{table*}
 
-Há variação entre repetições: os hipervolumes finais vão de 1,850 a 2,202,
-e $\Delta$ varia de 0,290 a 0,792. A repetição 1 tem o menor $\Delta$, mas
-apenas três pontos; a repetição 4 tem sete pontos, mas o menor hipervolume.
+Há variação entre repetições: os hipervolumes finais vão de 0,911 a 1,062, e
+$\Delta$ recalculado varia de 0,337 a 0,794. A repetição 1 tem o menor
+$\Delta$, mas apenas três pontos; a repetição 4 tem sete pontos, mas o menor
+hipervolume.
 Logo, quantidade de pontos não implica, por si só, melhor cobertura ou
 espaçamento. A interpretação é relativa à amostra e às referências estimadas,
-não uma comparação com uma frente ótima conhecida.
+não uma comparação com uma frente ótima conhecida. Não foram executadas
+baselines com LKH puro, NSGA-II ou MOEA/D; portanto, HV e $\Delta$ não permitem
+afirmar superioridade do NeuroLKH em relação a outros métodos.
 
 \section{Tomada de decisão multiatributo}
 
@@ -248,9 +290,11 @@ Rank & Solução & Distância (km) & Tempo (h) & CO$_2$ (kg) & MPR & P(frente) (
 
 As probabilidades de pertencer à fronteira nos cenários simulados são
 apresentadas para todas as alternativas na Tabela~\ref{tab:alternativas}.
-S6 tem 73,88\%, abaixo de S1 e S5 (100\%) e de S2 (99,82\%); portanto, esse
-indicador isolado não sustenta a escolha de S6. Ele complementa o ranking AHP,
-que considera os quatro critérios ponderados.
+S6 tem 73,88\%, o sexto maior valor entre as oito alternativas: fica abaixo de
+S1 e S5 (100\%), S2 (99,82\%), S4 (95,36\%) e S7 (85,10%), e acima de S8
+(71,52\%) e S3 (60,06\%). Em particular, S5 tem probabilidade de 100\%.
+Esse indicador não é um critério do AHP e não sustenta, por si só, a escolha
+de S6.
 
 \subsection{AHP e escolha}
 
@@ -258,9 +302,25 @@ O AHP foi aplicado em duas etapas \cite{saaty}. Os julgamentos par a par
 dos critérios usam a escala de Saaty: distância/tempo $=1/9$,
 distância/CO$_2=1/3$, distância/MPR $=1/5$, tempo/CO$_2=3$,
 tempo/MPR $=6$ e CO$_2$/MPR $=2$; comparações não informadas são
-neutras. Os pesos locais das alternativas são obtidos a partir de avaliações
-monotônicas de desempenho em escala de 1 a 9, e a pontuação global é a soma
-ponderada desses pesos locais.
+neutras. Em relação à versão anterior, o julgamento tempo/MPR foi alterado
+de 1 para 6; a revisão não foi apoiada por nova evidência empírica nem por
+consulta documentada ao decisor. Ela reduziu a razão de consistência de
+12,25\% para 7,17\%, mas consistência matemática não valida o conteúdo do
+julgamento. Assim, os resultados abaixo são exploratórios e dependem de
+ratificação dessa preferência.
+
+Para cada critério, o desempenho observado $x$ é convertido em uma nota
+contínua por $q(x)=9-8(x-x_{\min})/(x_{\max}-x_{\min})$ (menor é melhor);
+se todos os valores forem iguais, usa-se a mesma nota para todos. As notas
+são divididas pela soma dentro de cada critério para obter os pesos locais.
+Portanto, a escala de 1 a 9 corresponde aqui a uma interpolação linear
+min--max, não a uma função de valor elicidada. Além disso, CO$_2$ acompanha
+quase linearmente a distância (correlação de Pearson $r\approx0{,}9996$ nos
+valores exibidos), enquanto MPR é o máximo entre regrets relativos de
+distância e tempo. Esses critérios se sobrepõem aos objetivos e não são
+independentes; a soma ponderada pode contar parte dos mesmos compromissos mais
+de uma vez. Os pesos resultantes e a consistência da matriz revisada estão na
+Tabela~\ref{tab:pesos}.
 
 \begin{table}[t]
 \centering
@@ -289,20 +349,46 @@ menor distância, menor emissão e menor MPR. S1 ilustra outro
 extremo: tem a menor distância e emissão, mas o maior tempo e MPR; S8 tem
 o menor tempo, mas maior distância e emissão. Esses compromissos explicam a
 necessidade de ponderar os atributos, em vez de escolher pelo melhor valor
-isolado.
+isolado. Portanto, S5 é preferível em três dos quatro critérios do AHP,
+enquanto S6 é preferível em tempo nominal; a probabilidade de frente também
+favorece S5, mas não integra a pontuação AHP.
+
+Uma análise global de pesos por Monte Carlo sorteou 2.000.000 vetores da
+distribuição uniforme no simplex de quatro critérios
+($\operatorname{Dirichlet}(1,1,1,1)$, semente 20261122), mantendo fixas as
+prioridades locais calculadas pela função min--max. S6 ficou em primeiro em
+23,06\% das amostras, ante 64,84\% para S5, 11,56\% para S1 e 0,54\% para
+S8. Essas frequências representam volumes sob a distribuição uniforme de
+pesos escolhida, não probabilidades objetivas de preferência. Como teste da
+escala das notas, substituí-las por notas igualmente espaçadas de 9 a 1
+conforme a ordem de cada critério, mantendo os pesos da matriz revisada,
+coloca S7 em primeiro (15,177\%), S5 em segundo (15,046\%) e S6 em terceiro
+(15,039\%). Logo, tanto os pesos quanto a função de notas afetam o vencedor.
+
+Na ablação sem CO$_2$, a submatriz original para distância, tempo e MPR
+produz pesos de 5,62\%, 75,57\% e 18,81\%, respectivamente; S6 permanece em
+primeiro (17,766\%), à frente de S5 (17,208\%). Já no modelo de apenas
+distância e tempo, com o julgamento original distância/tempo $=1/9$, os pesos
+são 10\% e 90\%: S8 passa a primeiro (17,973\%), S7 a segundo (17,466\%) e
+S6 a terceiro (16,784\%). A posição de S6 depende, portanto, da inclusão do
+MPR, que já agrega regrets dos dois objetivos; a escolha não é robusta à
+redução dos critérios redundantes.
 
 A razão de consistência, 7,17\%, está abaixo do limite de referência de 10\%,
-indicando consistência aceitável nos julgamentos par a par. A diferença entre
-S6 e S5, contudo, permanece pequena. O tempo simulado médio de S6 é
-18,5035 h e o CVaR$_{95}$ é 20,1620 h; esses resultados complementam a decisão
-sob incerteza.
+mas refere-se à matriz revisada, cujo julgamento tempo/MPR não foi validado
+pelo decisor. A proximidade entre S6 e S5, a variação do vencedor com as notas
+e pesos e a ablação dos critérios impedem uma recomendação definitiva. O
+tempo simulado médio de S6 é 18,5035 h e o CVaR$_{95}$ é 20,1620 h; esses
+resultados complementam a decisão sob incerteza. A posição das alternativas
+e a localização de S6 na fronteira são mostradas na Fig.~\ref{fig:decisao};
+o circuito correspondente é apresentado na Fig.~\ref{fig:rota}.
 
-\begin{figure*}[t]
+\begin{figure}[t]
 \centering
-\includegraphics[width=0.76\textwidth]{figuras_entrega3/fronteira_decisao.pdf}
+\includegraphics[width=\columnwidth]{figuras_entrega3/fronteira_decisao.pdf}
 \caption{Fronteira global avaliada pelo AHP; a linha conecta os pontos e a estrela identifica S6. A distância está no eixo horizontal e o tempo no vertical.}
 \label{fig:decisao}
-\end{figure*}
+\end{figure}
 
 \begin{figure}[t]
 \centering
@@ -315,12 +401,16 @@ sob incerteza.
 
 Nas cinco repetições, o NeuroLKH produziu uma união global de oito soluções
 não dominadas. A evolução média do hipervolume indica maior área coberta com
-mais avaliações, enquanto $\Delta$ apresenta melhora média com variação entre
-execuções. O AHP seleciona S6 pelo compromisso entre tempo nominal e os
-atributos adicionais, mas sua vantagem sobre S5 é estreita. Como a razão de
-consistência é de 7,17\%, abaixo do limite de referência de 10\%, os
-julgamentos apresentam consistência aceitável. A proximidade entre S6 e S5
-continua relevante na interpretação da recomendação.
+mais avaliações, mas isso não isola convergência porque a ordem dos pesos é
+fixa. O $\Delta$ foi recalculado na mesma escala observada, mas ambos os
+indicadores permanecem descritivos de uma amostra sem frente ótima conhecida.
+O conjunto obtido pela soma ponderada contém apenas soluções suportadas; a
+lacuna entre S6 (1.266,3 km) e S7 (1.377,2 km) pode ocultar soluções não
+suportadas, que este sweep não alcança. O AHP revisado atribui a maior
+pontuação a S6, porém a análise global de pesos, a mudança de notas e a
+ablação de critérios mostram que o resultado é sensível. Sem baselines, não
+se pode afirmar superioridade do NeuroLKH nem fazer uma recomendação
+definitiva.
 
 \begin{thebibliography}{00}
 \bibitem{modelagem}
